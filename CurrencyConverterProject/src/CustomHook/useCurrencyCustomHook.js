@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 // Custom Hook to fetch exchange rates using ExchangeRate API
 function useCurrencyCustomHook(baseCurrency) {
   const [currencyData, setCurrencyData] = useState({});
-  const [loading, setLoading] = useState(true);
   useEffect(() => {
     async function fetchCurrencyRates() {
       try {
