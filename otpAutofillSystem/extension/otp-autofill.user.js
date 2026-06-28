@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         OTP Auto-fill (appointment)
 // @namespace    otp-autofill-system
-// @version      1.0.0
-// @description  Reads the phone number on the page, asks the routing server to wait, and auto-fills the OTP the moment it arrives from the phone.
-// @match        https://CHANGE-ME.example.com/*
+// @version      1.1.0
+// @description  Reads the phone number on the page, asks the routing server to wait, and auto-fills the OTP the moment it arrives from the phone. Optional auto-submit once OTP + captcha are ready.
+// @match        https://pk-gr-services.gvcworld.eu/*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -16,7 +16,7 @@
   const NUMBER_SELECTOR = '#ind_phonenumber'   // number wala field
   const OTP_SELECTOR = '#onetimepassword'      // OTP wala field
   const REQUEST_OTP_TEXT = 'request otp code'  // is text wale element par click = OTP request
-  const SUBMIT_SELECTOR = null                 // Submit/Verify button (abhi pata nahi -> baad mein)
+  const SUBMIT_TEXT = 'book your appointment'  // is text wale element par click = submit
   const AUTO_SUBMIT = true                     // OTP + captcha ready hote hi submit
   // ==========================================================================
 
@@ -30,6 +30,17 @@
   function getNumber() {
     const el = document.querySelector(NUMBER_SELECTOR)
     return el ? normalizeNumber(el.value || el.getAttribute('value')) : ''
+  }
+
+  // Find a visible, clickable element whose text matches `text`.
+  function findByText(text) {
+    const wanted = text.toLowerCase()
+    const els = document.querySelectorAll('button, a, span, input[type="submit"], input[type="button"]')
+    for (const el of els) {
+      const t = ((el.textContent || '') + ' ' + (el.value || '')).trim().toLowerCase()
+      if (t.includes(wanted) && t.length < 80 && el.offsetParent !== null) return el
+    }
+    return null
   }
 
   // ---- WebSocket to the routing server -------------------------------------
@@ -71,7 +82,6 @@
     const field = document.querySelector(OTP_SELECTOR)
     if (!field) { log('OTP field not found!'); return }
     field.value = otp
-    // React/parsley-style frameworks ko batao ke value badli hai
     field.dispatchEvent(new Event('input', { bubbles: true }))
     field.dispatchEvent(new Event('change', { bubbles: true }))
     field.style.transition = 'background .3s'
@@ -96,25 +106,29 @@
 
   // ---- Auto-submit when OTP + captcha are both ready -----------------------
   function captchaSolved() {
-    // Agar page par reCAPTCHA hai to uska token check karo; warna solved samjho.
+    // reCAPTCHA token mojood ho to solved; warna (koi captcha nahi) solved samjho.
     const tokens = document.querySelectorAll('textarea[name="g-recaptcha-response"]')
     if (tokens.length === 0) return true
     return Array.from(tokens).some((t) => t.value && t.value.length > 0)
   }
 
+  let submitting = false
   function maybeSubmit() {
-    if (!AUTO_SUBMIT || !SUBMIT_SELECTOR) return
+    if (!AUTO_SUBMIT || submitting) return
+    submitting = true
     let tries = 0
     const timer = setInterval(() => {
       tries++
       const otpField = document.querySelector(OTP_SELECTOR)
       const otpReady = otpField && otpField.value && otpField.value.length >= 4
       if (otpReady && captchaSolved()) {
-        const btn = document.querySelector(SUBMIT_SELECTOR)
+        const btn = findByText(SUBMIT_TEXT)
         if (btn) { btn.click(); log('submitted ✅') }
+        else log('submit element not found (text: ' + SUBMIT_TEXT + ')')
         clearInterval(timer)
+        submitting = false
       }
-      if (tries > 120) clearInterval(timer) // ~60s baad ruk jao
+      if (tries > 120) { clearInterval(timer); submitting = false } // ~60s baad ruk jao
     }, 500)
   }
 
