@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OTP Auto-fill (appointment)
 // @namespace    otp-autofill-system
-// @version      2.0.0
+// @version      2.1.0
 // @description  Reads the phone number on the page, asks the routing server to wait, and auto-fills the OTP the moment it arrives from the phone. Optional auto-submit once OTP + captcha are ready.
 // @match        https://pk-gr-services.gvcworld.eu/*
 // @grant        none
@@ -18,7 +18,8 @@
   const OTP_SELECTOR = '#onetimepassword'         // OTP wala field
   const REQUEST_OTP_TEXT = 'request otp code'     // is text wale element par click = OTP request
   const SUBMIT_TEXT = 'book your appointment'     // is text wale element par click = submit
-  const AUTO_SUBMIT = true                        // OTP + captcha ready hote hi submit
+  const CHECKBOX_SELECTOR = '#submitinfo'         // confirm checkbox — submit se pehle tick hoga
+  const AUTO_SUBMIT = true                        // OTP + captcha + checkbox ready hote hi submit
   // ==========================================================================
 
   const log = (...a) => console.log('%c[OTP]', 'color:#6366f1;font-weight:bold', ...a)
@@ -135,11 +136,24 @@
       const otpField = document.querySelector(OTP_SELECTOR)
       const otpReady = otpField && otpField.value && otpField.value.length >= 4
       if (otpReady && captchaSolved()) {
-        const btn = findByText(SUBMIT_TEXT)
-        if (btn) { btn.click(); log('submitted ✅'); badge('Submitted ✅', '#16a34a') }
-        else { log('submit element not found'); badge('Submit btn not found', '#ef4444') }
-        clearInterval(timer)
-        submitting = false
+        // Tick the confirmation checkbox (if present) before submitting.
+        const cb = document.querySelector(CHECKBOX_SELECTOR)
+        if (cb && !cb.checked) {
+          cb.click()
+          if (!cb.checked) {
+            cb.checked = true
+            cb.dispatchEvent(new Event('click', { bubbles: true }))
+            cb.dispatchEvent(new Event('change', { bubbles: true }))
+          }
+        }
+        // Submit only once the checkbox is actually checked (or there is none).
+        if (!cb || cb.checked) {
+          const btn = findByText(SUBMIT_TEXT)
+          if (btn) { btn.click(); log('submitted ✅'); badge('Submitted ✅', '#16a34a') }
+          else { log('submit element not found'); badge('Submit btn not found', '#ef4444') }
+          clearInterval(timer)
+          submitting = false
+        }
       }
       if (tries > 120) { clearInterval(timer); submitting = false }
     }, 500)
