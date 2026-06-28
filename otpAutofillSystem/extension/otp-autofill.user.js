@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OTP Auto-fill (appointment)
 // @namespace    otp-autofill-system
-// @version      3.1.0
-// @description  Auto-requests OTP when the Request-OTP button appears (new date), auto-fills the OTP from the phone, and submits when a slot is selected + captcha solved + checkbox ticked. Re-submits on slot/time change without a new OTP.
+// @version      3.2.0
+// @description  Auto-requests OTP when a slot is selected, auto-fills the OTP from the phone, and submits when slot + captcha + checkbox are ready. Re-submits on slot change without a new OTP. Robust WebSocket: re-registers the wait on reconnect + keepalive.
 // @match        https://pk-gr-services.gvcworld.eu/*
 // @grant        none
 // @run-at       document-idle
@@ -20,7 +20,7 @@
   const REQUEST_OTP_TEXT = 'request otp code'     // is text wale element par click = OTP request
   const SUBMIT_TEXT = 'book your appointment'     // submit element ka text
   const CHECKBOX_SELECTOR = '#submitinfo'         // confirm checkbox
-  const AUTO_REQUEST_OTP = true                   // Request-OTP button appear hote hi auto-click
+  const AUTO_REQUEST_OTP = true                   // slot select hote hi Request-OTP auto-click
   const AUTO_SUBMIT = true                        // sab ready hote hi auto-submit
   // ==========================================================================
 
@@ -64,42 +64,54 @@
   }
 
   // ---- state ---------------------------------------------------------------
-  let hasOtp = false               // abhi koi valid (fresh) OTP filled hai?
-  let lastSubmittedTime = ''       // jis time-slot ke liye submit ho chuka
-  let reqBtnVisible = false        // pichli baar Request-OTP button dikh raha tha?
+  let hasOtp = false                // abhi koi valid (fresh) OTP filled hai?
+  let lastSubmittedTime = ''        // jis time-slot ke liye submit ho chuka
+  let reqBtnVisible = false         // pichli baar Request-OTP button dikh raha tha?
   let otpRequestedThisCycle = false // is date-cycle mein Request-OTP click ho chuka?
+  let currentWaitNumber = null      // jis number ka wait chahiye (persist — reconnect par dobara register)
 
-  // ---- WebSocket -----------------------------------------------------------
-  let ws = null, wsReady = false, pendingWaitNumber = null
+  // ---- WebSocket (robust: re-register on reconnect + keepalive) ------------
+  let ws = null, wsReady = false
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
     ws = new WebSocket(WS_URL)
-    ws.onopen = () => { wsReady = true; log('connected'); badge('Connected to server', '#0ea5e9'); if (pendingWaitNumber) sendWait(pendingWaitNumber) }
+    ws.onopen = () => {
+      wsReady = true
+      log('connected')
+      badge(currentWaitNumber ? 'Waiting for OTP …' + currentWaitNumber : 'Connected to server',
+            currentWaitNumber ? '#f59e0b' : '#0ea5e9')
+      if (currentWaitNumber) registerWait()   // reconnect ke baad wait dobara bhejo
+    }
     ws.onmessage = (e) => {
       let m; try { m = JSON.parse(e.data) } catch { return }
       if (m.type === 'otp' && m.otp) fillOtp(m.otp)
       if (m.type === 'error') { log('server error:', m.error); badge('Server: ' + m.error, '#ef4444') }
     }
-    ws.onclose = () => { wsReady = false; setTimeout(connect, 2000) }
-    ws.onerror = () => ws.close()
+    ws.onclose = () => { wsReady = false; setTimeout(connect, 1500) }
+    ws.onerror = () => { try { ws.close() } catch {} }
   }
-  function sendWait(number) {
+  function registerWait() {
+    if (wsReady && currentWaitNumber) {
+      ws.send(JSON.stringify({ type: 'wait', number: currentWaitNumber, key: ADMIN_KEY, field: OTP_SELECTOR, url: location.href }))
+      log('waiting for OTP of …' + currentWaitNumber)
+      badge('Waiting for OTP …' + currentWaitNumber, '#f59e0b')
+    }
+  }
+  function startWait(number) {
     if (!number) { badge('Number not found on page', '#ef4444'); return }
-    if (wsReady) {
-      ws.send(JSON.stringify({ type: 'wait', number, key: ADMIN_KEY, field: OTP_SELECTOR, url: location.href }))
-      log('waiting for OTP of …' + number); badge('Waiting for OTP …' + number, '#f59e0b')
-      pendingWaitNumber = null
-    } else { pendingWaitNumber = number; connect() }
+    currentWaitNumber = number
+    if (wsReady) registerWait(); else connect()
   }
+  // keepalive — connection ko idle timeout se bachao
+  setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' })) }, 25000)
 
   // ---- OTP request (fresh start) -------------------------------------------
   function onRequestOtp() {
-    const number = getNumber()
     const f = document.querySelector(OTP_SELECTOR)
     if (f) f.value = ''          // purana OTP saaf (freshness)
     hasOtp = false
     lastSubmittedTime = ''
-    sendWait(number)             // server bhi purana clear karega, fresh wait
+    startWait(getNumber())       // server bhi purana clear karega, fresh wait
   }
 
   // ---- Fill OTP ------------------------------------------------------------
@@ -112,6 +124,7 @@
     field.style.transition = 'background .3s'; field.style.background = '#dcfce7'
     hasOtp = true
     lastSubmittedTime = ''       // naya OTP -> dobara submit allow
+    currentWaitNumber = null     // wait poora hua
     log('auto-filled OTP:', otp); badge('OTP filled: ' + otp, '#16a34a')
   }
 
@@ -125,9 +138,9 @@
   }, true)
 
   // ---- Loop 1: Request-OTP click jab slot select ho ------------------------
-  //  Button to date select par hi aa jata hai (slots show). Lekin click TAB
-  //  karna hai jab slot select ho kar time box mein attach ho (#selectedTimeMsg).
-  //  Naye date par button dobara appear hota hai -> naya cycle.
+  //  Button date select par hi aa jata hai (slots show). Click TAB jab slot
+  //  select ho kar time box mein attach ho (#selectedTimeMsg). Nayi date par
+  //  button dobara appear -> naya cycle.
   setInterval(() => {
     const btn = findByText(REQUEST_OTP_TEXT)
     const visibleNow = !!btn
@@ -141,8 +154,8 @@
   }, 500)
 
   // ---- Loop 2: submit jab sab ready ho -------------------------------------
-  //  Conditions: slot select (time text) + fresh OTP + captcha + checkbox.
-  //  Time badle to dobara submit (same OTP, naya OTP nahi).
+  //  slot select (time text) + fresh OTP + captcha + checkbox. Time badle to
+  //  dobara submit (same OTP, naya OTP nahi).
   setInterval(() => {
     if (!AUTO_SUBMIT) return
     const timeText = getTimeText()
@@ -157,7 +170,7 @@
       cb.click()
       if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })) }
     }
-    if (cb && !cb.checked) return                          // checkbox abhi tick nahi -> agle tick par
+    if (cb && !cb.checked) return                          // checkbox abhi tick nahi
 
     const btn = findByText(SUBMIT_TEXT)
     if (btn) {
