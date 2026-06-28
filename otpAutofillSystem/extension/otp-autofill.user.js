@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OTP Auto-fill (appointment)
 // @namespace    otp-autofill-system
-// @version      3.0.0
+// @version      3.1.0
 // @description  Auto-requests OTP when the Request-OTP button appears (new date), auto-fills the OTP from the phone, and submits when a slot is selected + captcha solved + checkbox ticked. Re-submits on slot/time change without a new OTP.
 // @match        https://pk-gr-services.gvcworld.eu/*
 // @grant        none
@@ -64,9 +64,10 @@
   }
 
   // ---- state ---------------------------------------------------------------
-  let hasOtp = false           // abhi koi valid (fresh) OTP filled hai?
-  let lastSubmittedTime = ''   // jis time-slot ke liye submit ho chuka
-  let reqBtnVisible = false    // pichli baar Request-OTP button dikh raha tha?
+  let hasOtp = false               // abhi koi valid (fresh) OTP filled hai?
+  let lastSubmittedTime = ''       // jis time-slot ke liye submit ho chuka
+  let reqBtnVisible = false        // pichli baar Request-OTP button dikh raha tha?
+  let otpRequestedThisCycle = false // is date-cycle mein Request-OTP click ho chuka?
 
   // ---- WebSocket -----------------------------------------------------------
   let ws = null, wsReady = false, pendingWaitNumber = null
@@ -123,13 +124,18 @@
     }
   }, true)
 
-  // ---- Loop 1: Request-OTP button appear hote hi auto-click -----------------
+  // ---- Loop 1: Request-OTP click jab slot select ho ------------------------
+  //  Button to date select par hi aa jata hai (slots show). Lekin click TAB
+  //  karna hai jab slot select ho kar time box mein attach ho (#selectedTimeMsg).
+  //  Naye date par button dobara appear hota hai -> naya cycle.
   setInterval(() => {
     const btn = findByText(REQUEST_OTP_TEXT)
     const visibleNow = !!btn
-    if (AUTO_REQUEST_OTP && visibleNow && !reqBtnVisible) {
-      log('Request-OTP button appeared -> auto-click')
-      btn.click()   // site ko OTP bhejne ko trigger; humara click-listener onRequestOtp() chala dega
+    if (visibleNow && !reqBtnVisible) otpRequestedThisCycle = false // nayi date -> naya cycle
+    if (AUTO_REQUEST_OTP && visibleNow && !otpRequestedThisCycle && getTimeText()) {
+      log('slot selected + Request-OTP visible -> auto-click')
+      otpRequestedThisCycle = true
+      btn.click()   // site ko OTP SMS bhejne ko trigger; click-listener onRequestOtp() chala dega
     }
     reqBtnVisible = visibleNow
   }, 500)
