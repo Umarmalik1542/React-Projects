@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OTP Auto-fill (appointment)
 // @namespace    otp-autofill-system
-// @version      1.1.0
+// @version      2.0.0
 // @description  Reads the phone number on the page, asks the routing server to wait, and auto-fills the OTP the moment it arrives from the phone. Optional auto-submit once OTP + captcha are ready.
 // @match        https://pk-gr-services.gvcworld.eu/*
 // @grant        none
@@ -11,27 +11,25 @@
 (function () {
   'use strict'
 
-  // ====== CONFIG (edit these) ===============================================
-  const SERVER = 'localhost:5000'              // laptop ka server (IP:port)
-  const NUMBER_SELECTOR = '#ind_phonenumber'   // number wala field
-  const OTP_SELECTOR = '#onetimepassword'      // OTP wala field
-  const REQUEST_OTP_TEXT = 'request otp code'  // is text wale element par click = OTP request
-  const SUBMIT_TEXT = 'book your appointment'  // is text wale element par click = submit
-  const AUTO_SUBMIT = true                     // OTP + captcha ready hote hi submit
+  // ====== CONFIG ============================================================
+  const WS_URL = 'wss://greeceserver.com/otp-ws'  // VPS server (secure WebSocket)
+  const ADMIN_KEY = 'gr-admin-7Kp2Qe9Zx'          // sirf is extension ke paas — secret rakhein
+  const NUMBER_SELECTOR = '#ind_phonenumber'      // number wala field
+  const OTP_SELECTOR = '#onetimepassword'         // OTP wala field
+  const REQUEST_OTP_TEXT = 'request otp code'     // is text wale element par click = OTP request
+  const SUBMIT_TEXT = 'book your appointment'     // is text wale element par click = submit
+  const AUTO_SUBMIT = true                        // OTP + captcha ready hote hi submit
   // ==========================================================================
 
   const log = (...a) => console.log('%c[OTP]', 'color:#6366f1;font-weight:bold', ...a)
 
-  // ---- Small on-screen status badge (so you can SEE it working) -------------
+  // ---- Small on-screen status badge ----------------------------------------
   let badgeEl = null
   function badge(text, color = '#6366f1') {
     if (!badgeEl) {
       badgeEl = document.createElement('div')
       badgeEl.style.cssText =
-        'position:fixed;bottom:16px;right:16px;z-index:2147483647;' +
-        'font:600 13px system-ui,sans-serif;color:#fff;padding:8px 12px;' +
-        'border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.3);' +
-        'transition:background .3s;pointer-events:none'
+        'position:fixed;bottom:16px;right:16px;z-index:2147483647;font:600 13px system-ui,sans-serif;color:#fff;padding:8px 12px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.3);transition:background .3s;pointer-events:none'
       document.body.appendChild(badgeEl)
     }
     badgeEl.textContent = '🔑 ' + text
@@ -42,19 +40,16 @@
     if (!raw) return ''
     return String(raw).replace(/\D/g, '').slice(-10)
   }
-
   function getNumber() {
     const el = document.querySelector(NUMBER_SELECTOR)
     return el ? normalizeNumber(el.value || el.getAttribute('value')) : ''
   }
-
-  // Find a visible, clickable element whose text matches `text`.
   function findByText(text) {
-    const wanted = text.toLowerCase()
+    const w = text.toLowerCase()
     const els = document.querySelectorAll('button, a, span, input[type="submit"], input[type="button"]')
     for (const el of els) {
       const t = ((el.textContent || '') + ' ' + (el.value || '')).trim().toLowerCase()
-      if (t.includes(wanted) && t.length < 80 && el.offsetParent !== null) return el
+      if (t.includes(w) && t.length < 80 && el.offsetParent !== null) return el
     }
     return null
   }
@@ -66,7 +61,7 @@
 
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
-    ws = new WebSocket(`ws://${SERVER}/ws`)
+    ws = new WebSocket(WS_URL)
     ws.onopen = () => {
       wsReady = true
       log('connected to server')
@@ -77,15 +72,16 @@
       let msg
       try { msg = JSON.parse(e.data) } catch { return }
       if (msg.type === 'otp' && msg.otp) fillOtp(msg.otp)
+      if (msg.type === 'error') { log('server error:', msg.error); badge('Server: ' + msg.error, '#ef4444') }
     }
     ws.onclose = () => { wsReady = false; setTimeout(connect, 2000) }
     ws.onerror = () => ws.close()
   }
 
   function sendWait(number) {
-    if (!number) return
+    if (!number) { badge('Number not found on page', '#ef4444'); return }
     if (wsReady) {
-      ws.send(JSON.stringify({ type: 'wait', number, field: OTP_SELECTOR, url: location.href }))
+      ws.send(JSON.stringify({ type: 'wait', number, key: ADMIN_KEY, field: OTP_SELECTOR, url: location.href }))
       log('waiting for OTP of number …' + number)
       badge('Waiting for OTP …' + number, '#f59e0b')
       pendingWaitNumber = null
@@ -95,10 +91,9 @@
     }
   }
 
-  // ---- Fill the OTP field --------------------------------------------------
   function fillOtp(otp) {
     const field = document.querySelector(OTP_SELECTOR)
-    if (!field) { log('OTP field not found!'); return }
+    if (!field) { log('OTP field not found!'); badge('OTP field not found', '#ef4444'); return }
     field.value = otp
     field.dispatchEvent(new Event('input', { bubbles: true }))
     field.dispatchEvent(new Event('change', { bubbles: true }))
@@ -125,7 +120,6 @@
 
   // ---- Auto-submit when OTP + captcha are both ready -----------------------
   function captchaSolved() {
-    // reCAPTCHA token mojood ho to solved; warna (koi captcha nahi) solved samjho.
     const tokens = document.querySelectorAll('textarea[name="g-recaptcha-response"]')
     if (tokens.length === 0) return true
     return Array.from(tokens).some((t) => t.value && t.value.length > 0)
@@ -142,15 +136,17 @@
       const otpReady = otpField && otpField.value && otpField.value.length >= 4
       if (otpReady && captchaSolved()) {
         const btn = findByText(SUBMIT_TEXT)
-        if (btn) { btn.click(); log('submitted ✅') }
-        else log('submit element not found (text: ' + SUBMIT_TEXT + ')')
+        if (btn) { btn.click(); log('submitted ✅'); badge('Submitted ✅', '#16a34a') }
+        else { log('submit element not found'); badge('Submit btn not found', '#ef4444') }
         clearInterval(timer)
         submitting = false
       }
-      if (tries > 120) { clearInterval(timer); submitting = false } // ~60s baad ruk jao
+      if (tries > 120) { clearInterval(timer); submitting = false }
     }, 500)
   }
 
+  // Connect right away so the WebSocket is ready before the OTP request.
+  connect()
   log('script loaded on', location.host)
   badge('OTP helper ready', '#6366f1')
 })()
