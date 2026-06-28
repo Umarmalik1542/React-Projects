@@ -22,6 +22,22 @@
 
   const log = (...a) => console.log('%c[OTP]', 'color:#6366f1;font-weight:bold', ...a)
 
+  // ---- Small on-screen status badge (so you can SEE it working) -------------
+  let badgeEl = null
+  function badge(text, color = '#6366f1') {
+    if (!badgeEl) {
+      badgeEl = document.createElement('div')
+      badgeEl.style.cssText =
+        'position:fixed;bottom:16px;right:16px;z-index:2147483647;' +
+        'font:600 13px system-ui,sans-serif;color:#fff;padding:8px 12px;' +
+        'border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.3);' +
+        'transition:background .3s;pointer-events:none'
+      document.body.appendChild(badgeEl)
+    }
+    badgeEl.textContent = '🔑 ' + text
+    badgeEl.style.background = color
+  }
+
   function normalizeNumber(raw) {
     if (!raw) return ''
     return String(raw).replace(/\D/g, '').slice(-10)
@@ -54,6 +70,7 @@
     ws.onopen = () => {
       wsReady = true
       log('connected to server')
+      badge('Connected to server', '#0ea5e9')
       if (pendingWaitNumber) sendWait(pendingWaitNumber)
     }
     ws.onmessage = (e) => {
@@ -70,6 +87,7 @@
     if (wsReady) {
       ws.send(JSON.stringify({ type: 'wait', number, field: OTP_SELECTOR, url: location.href }))
       log('waiting for OTP of number …' + number)
+      badge('Waiting for OTP …' + number, '#f59e0b')
       pendingWaitNumber = null
     } else {
       pendingWaitNumber = number
@@ -87,6 +105,7 @@
     field.style.transition = 'background .3s'
     field.style.background = '#dcfce7'
     log('auto-filled OTP:', otp)
+    badge('OTP filled: ' + otp, '#16a34a')
     maybeSubmit()
   }
 
@@ -133,4 +152,5 @@
   }
 
   log('script loaded on', location.host)
+  badge('OTP helper ready', '#6366f1')
 })()
