@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OTP Auto-fill (appointment)
 // @namespace    otp-autofill-system
-// @version      2.1.0
-// @description  Reads the phone number on the page, asks the routing server to wait, and auto-fills the OTP the moment it arrives from the phone. Optional auto-submit once OTP + captcha are ready.
+// @version      3.0.0
+// @description  Auto-requests OTP when the Request-OTP button appears (new date), auto-fills the OTP from the phone, and submits when a slot is selected + captcha solved + checkbox ticked. Re-submits on slot/time change without a new OTP.
 // @match        https://pk-gr-services.gvcworld.eu/*
 // @grant        none
 // @run-at       document-idle
@@ -13,18 +13,20 @@
 
   // ====== CONFIG ============================================================
   const WS_URL = 'wss://greeceserver.com/otp-ws'  // VPS server (secure WebSocket)
-  const ADMIN_KEY = 'gr-admin-7Kp2Qe9Zx'          // sirf is extension ke paas — secret rakhein
+  const ADMIN_KEY = 'gr-admin-7Kp2Qe9Zx'          // sirf is extension ke paas — secret
   const NUMBER_SELECTOR = '#ind_phonenumber'      // number wala field
   const OTP_SELECTOR = '#onetimepassword'         // OTP wala field
+  const TIME_SELECTOR = '#selectedTimeMsg'        // selected time (khaali = koi slot nahi)
   const REQUEST_OTP_TEXT = 'request otp code'     // is text wale element par click = OTP request
-  const SUBMIT_TEXT = 'book your appointment'     // is text wale element par click = submit
-  const CHECKBOX_SELECTOR = '#submitinfo'         // confirm checkbox — submit se pehle tick hoga
-  const AUTO_SUBMIT = true                        // OTP + captcha + checkbox ready hote hi submit
+  const SUBMIT_TEXT = 'book your appointment'     // submit element ka text
+  const CHECKBOX_SELECTOR = '#submitinfo'         // confirm checkbox
+  const AUTO_REQUEST_OTP = true                   // Request-OTP button appear hote hi auto-click
+  const AUTO_SUBMIT = true                        // sab ready hote hi auto-submit
   // ==========================================================================
 
   const log = (...a) => console.log('%c[OTP]', 'color:#6366f1;font-weight:bold', ...a)
 
-  // ---- Small on-screen status badge ----------------------------------------
+  // ---- status badge --------------------------------------------------------
   let badgeEl = null
   function badge(text, color = '#6366f1') {
     if (!badgeEl) {
@@ -37,13 +39,14 @@
     badgeEl.style.background = color
   }
 
-  function normalizeNumber(raw) {
-    if (!raw) return ''
-    return String(raw).replace(/\D/g, '').slice(-10)
-  }
+  function normalizeNumber(raw) { return raw ? String(raw).replace(/\D/g, '').slice(-10) : '' }
   function getNumber() {
     const el = document.querySelector(NUMBER_SELECTOR)
     return el ? normalizeNumber(el.value || el.getAttribute('value')) : ''
+  }
+  function getTimeText() {
+    const el = document.querySelector(TIME_SELECTOR)
+    return el ? (el.textContent || '').trim() : ''
   }
   function findByText(text) {
     const w = text.toLowerCase()
@@ -54,112 +57,111 @@
     }
     return null
   }
-
-  // ---- WebSocket to the routing server -------------------------------------
-  let ws = null
-  let wsReady = false
-  let pendingWaitNumber = null
-
-  function connect() {
-    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
-    ws = new WebSocket(WS_URL)
-    ws.onopen = () => {
-      wsReady = true
-      log('connected to server')
-      badge('Connected to server', '#0ea5e9')
-      if (pendingWaitNumber) sendWait(pendingWaitNumber)
-    }
-    ws.onmessage = (e) => {
-      let msg
-      try { msg = JSON.parse(e.data) } catch { return }
-      if (msg.type === 'otp' && msg.otp) fillOtp(msg.otp)
-      if (msg.type === 'error') { log('server error:', msg.error); badge('Server: ' + msg.error, '#ef4444') }
-    }
-    ws.onclose = () => { wsReady = false; setTimeout(connect, 2000) }
-    ws.onerror = () => ws.close()
-  }
-
-  function sendWait(number) {
-    if (!number) { badge('Number not found on page', '#ef4444'); return }
-    if (wsReady) {
-      ws.send(JSON.stringify({ type: 'wait', number, key: ADMIN_KEY, field: OTP_SELECTOR, url: location.href }))
-      log('waiting for OTP of number …' + number)
-      badge('Waiting for OTP …' + number, '#f59e0b')
-      pendingWaitNumber = null
-    } else {
-      pendingWaitNumber = number
-      connect()
-    }
-  }
-
-  function fillOtp(otp) {
-    const field = document.querySelector(OTP_SELECTOR)
-    if (!field) { log('OTP field not found!'); badge('OTP field not found', '#ef4444'); return }
-    field.value = otp
-    field.dispatchEvent(new Event('input', { bubbles: true }))
-    field.dispatchEvent(new Event('change', { bubbles: true }))
-    field.style.transition = 'background .3s'
-    field.style.background = '#dcfce7'
-    log('auto-filled OTP:', otp)
-    badge('OTP filled: ' + otp, '#16a34a')
-    maybeSubmit()
-  }
-
-  // ---- Detect the "Request OTP" click --------------------------------------
-  document.addEventListener('click', (e) => {
-    let el = e.target
-    for (let i = 0; i < 6 && el; i++, el = el.parentElement) {
-      const txt = (el.textContent || '').trim().toLowerCase()
-      if (txt.includes(REQUEST_OTP_TEXT) && txt.length < 80) {
-        const number = getNumber()
-        log('Request-OTP clicked, number =', number)
-        sendWait(number)
-        break
-      }
-    }
-  }, true)
-
-  // ---- Auto-submit when OTP + captcha are both ready -----------------------
   function captchaSolved() {
     const tokens = document.querySelectorAll('textarea[name="g-recaptcha-response"]')
     if (tokens.length === 0) return true
     return Array.from(tokens).some((t) => t.value && t.value.length > 0)
   }
 
-  let submitting = false
-  function maybeSubmit() {
-    if (!AUTO_SUBMIT || submitting) return
-    submitting = true
-    let tries = 0
-    const timer = setInterval(() => {
-      tries++
-      const otpField = document.querySelector(OTP_SELECTOR)
-      const otpReady = otpField && otpField.value && otpField.value.length >= 4
-      if (otpReady && captchaSolved()) {
-        // Tick the confirmation checkbox (if present) before submitting.
-        const cb = document.querySelector(CHECKBOX_SELECTOR)
-        if (cb && !cb.checked) {
-          cb.click()
-          if (!cb.checked) {
-            cb.checked = true
-            cb.dispatchEvent(new Event('click', { bubbles: true }))
-            cb.dispatchEvent(new Event('change', { bubbles: true }))
-          }
-        }
-        // Submit only once the checkbox is actually checked (or there is none).
-        if (!cb || cb.checked) {
-          const btn = findByText(SUBMIT_TEXT)
-          if (btn) { btn.click(); log('submitted ✅'); badge('Submitted ✅', '#16a34a') }
-          else { log('submit element not found'); badge('Submit btn not found', '#ef4444') }
-          clearInterval(timer)
-          submitting = false
-        }
-      }
-      if (tries > 120) { clearInterval(timer); submitting = false }
-    }, 500)
+  // ---- state ---------------------------------------------------------------
+  let hasOtp = false           // abhi koi valid (fresh) OTP filled hai?
+  let lastSubmittedTime = ''   // jis time-slot ke liye submit ho chuka
+  let reqBtnVisible = false    // pichli baar Request-OTP button dikh raha tha?
+
+  // ---- WebSocket -----------------------------------------------------------
+  let ws = null, wsReady = false, pendingWaitNumber = null
+  function connect() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
+    ws = new WebSocket(WS_URL)
+    ws.onopen = () => { wsReady = true; log('connected'); badge('Connected to server', '#0ea5e9'); if (pendingWaitNumber) sendWait(pendingWaitNumber) }
+    ws.onmessage = (e) => {
+      let m; try { m = JSON.parse(e.data) } catch { return }
+      if (m.type === 'otp' && m.otp) fillOtp(m.otp)
+      if (m.type === 'error') { log('server error:', m.error); badge('Server: ' + m.error, '#ef4444') }
+    }
+    ws.onclose = () => { wsReady = false; setTimeout(connect, 2000) }
+    ws.onerror = () => ws.close()
+  }
+  function sendWait(number) {
+    if (!number) { badge('Number not found on page', '#ef4444'); return }
+    if (wsReady) {
+      ws.send(JSON.stringify({ type: 'wait', number, key: ADMIN_KEY, field: OTP_SELECTOR, url: location.href }))
+      log('waiting for OTP of …' + number); badge('Waiting for OTP …' + number, '#f59e0b')
+      pendingWaitNumber = null
+    } else { pendingWaitNumber = number; connect() }
   }
 
-  // Connect right away so the WebSocket is ready before the OTP request.
+  // ---- OTP request (fresh start) -------------------------------------------
+  function onRequestOtp() {
+    const number = getNumber()
+    const f = document.querySelector(OTP_SELECTOR)
+    if (f) f.value = ''          // purana OTP saaf (freshness)
+    hasOtp = false
+    lastSubmittedTime = ''
+    sendWait(number)             // server bhi purana clear karega, fresh wait
+  }
+
+  // ---- Fill OTP ------------------------------------------------------------
+  function fillOtp(otp) {
+    const field = document.querySelector(OTP_SELECTOR)
+    if (!field) { log('OTP field not found!'); badge('OTP field not found', '#ef4444'); return }
+    field.value = otp
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    field.dispatchEvent(new Event('change', { bubbles: true }))
+    field.style.transition = 'background .3s'; field.style.background = '#dcfce7'
+    hasOtp = true
+    lastSubmittedTime = ''       // naya OTP -> dobara submit allow
+    log('auto-filled OTP:', otp); badge('OTP filled: ' + otp, '#16a34a')
+  }
+
+  // ---- Detect a manual/auto click on the Request-OTP element ----------------
+  document.addEventListener('click', (e) => {
+    let el = e.target
+    for (let i = 0; i < 6 && el; i++, el = el.parentElement) {
+      const txt = (el.textContent || '').trim().toLowerCase()
+      if (txt.includes(REQUEST_OTP_TEXT) && txt.length < 80) { log('Request-OTP clicked'); onRequestOtp(); break }
+    }
+  }, true)
+
+  // ---- Loop 1: Request-OTP button appear hote hi auto-click -----------------
+  setInterval(() => {
+    const btn = findByText(REQUEST_OTP_TEXT)
+    const visibleNow = !!btn
+    if (AUTO_REQUEST_OTP && visibleNow && !reqBtnVisible) {
+      log('Request-OTP button appeared -> auto-click')
+      btn.click()   // site ko OTP bhejne ko trigger; humara click-listener onRequestOtp() chala dega
+    }
+    reqBtnVisible = visibleNow
+  }, 500)
+
+  // ---- Loop 2: submit jab sab ready ho -------------------------------------
+  //  Conditions: slot select (time text) + fresh OTP + captcha + checkbox.
+  //  Time badle to dobara submit (same OTP, naya OTP nahi).
+  setInterval(() => {
+    if (!AUTO_SUBMIT) return
+    const timeText = getTimeText()
+    if (!timeText) return                                  // koi slot select nahi
+    const f = document.querySelector(OTP_SELECTOR)
+    if (!hasOtp || !f || !f.value || f.value.length < 4) return  // fresh OTP nahi
+    if (!captchaSolved()) return                           // captcha nahi
+    if (timeText === lastSubmittedTime) return             // is slot ke liye ho chuka
+
+    const cb = document.querySelector(CHECKBOX_SELECTOR)
+    if (cb && !cb.checked) {
+      cb.click()
+      if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })) }
+    }
+    if (cb && !cb.checked) return                          // checkbox abhi tick nahi -> agle tick par
+
+    const btn = findByText(SUBMIT_TEXT)
+    if (btn) {
+      btn.click()
+      lastSubmittedTime = timeText
+      log('submitted for slot', timeText)
+      badge('Submitted (' + timeText + ') ✅', '#16a34a')
+    } else { badge('Submit btn not found', '#ef4444') }
+  }, 500)
+
   connect()
   log('script loaded on', location.host)
   badge('OTP helper ready', '#6366f1')

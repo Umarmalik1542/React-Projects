@@ -26,7 +26,10 @@ const SEND_KEY = 'gr-send-4Tn8Lm3Vy'    // PHONE app ke paas (OTP bhejne ke liye
 // ----------------------------------------------------------------------------
 
 const WAIT_TTL_MS = 5 * 60 * 1000
-const ORPHAN_OTP_TTL_MS = 90 * 1000
+const ORPHAN_OTP_TTL_MS = 60 * 1000
+// Jab browser "wait" register kare, sirf is choti window ke andar aaya orphan OTP
+// deliver hoga (natural race ke liye). Is se purana wala accept deliver na ho.
+const ORPHAN_RACE_GRACE_MS = 10 * 1000
 
 const waits = new Map()        // number -> { ws, field, expiresAt, ... }
 const orphanOtps = new Map()   // number -> { otp, at }
@@ -111,10 +114,13 @@ wss.on('connection', (ws) => {
       ws.numbers.add(number)
       ws.send(JSON.stringify({ type: 'waiting', number }))
       console.log(`[wait] browser waiting for …${number}`)
+      // Freshness: ek naya wait = fresh start. Purana orphan OTP har soorat hata
+      // do; sirf bohot recent (race window) wala deliver karo.
       const orphan = orphanOtps.get(number)
-      if (orphan && now() - orphan.at <= ORPHAN_OTP_TTL_MS) {
+      if (orphan) {
         orphanOtps.delete(number)
-        deliver(number, orphan.otp)
+        if (now() - orphan.at <= ORPHAN_RACE_GRACE_MS) deliver(number, orphan.otp)
+        else console.log(`[wait] discarded stale OTP for …${number}`)
       }
     }
 
