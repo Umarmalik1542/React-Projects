@@ -6,6 +6,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -14,6 +16,7 @@ import android.widget.Toast;
 /**
  * One-time setup: the user enters the phone number that will receive the OTP.
  * After that the SmsReceiver does all the work in the background.
+ * A "Test Send" button verifies the server path without needing a real SMS.
  */
 public class MainActivity extends Activity {
 
@@ -28,6 +31,7 @@ public class MainActivity extends Activity {
         numberInput = findViewById(R.id.numberInput);
         status = findViewById(R.id.status);
         Button saveBtn = findViewById(R.id.saveBtn);
+        Button testBtn = findViewById(R.id.testBtn);
 
         final SharedPreferences prefs = getSharedPreferences(Config.PREFS, MODE_PRIVATE);
         numberInput.setText(prefs.getString(Config.KEY_NUMBER, ""));
@@ -42,6 +46,27 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show();
             requestSmsPermission();
             updateStatus();
+        });
+
+        testBtn.setOnClickListener(v -> {
+            String num = numberInput.getText().toString().trim();
+            if (num.isEmpty()) {
+                Toast.makeText(this, "Pehle number daal kar Save dabayein", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Toast.makeText(this, "Test bhej rahe hain…", Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                String msg;
+                try {
+                    int code = Net.send(num, "Test OTP code 123456");
+                    msg = "Server ne jawab diya: " + code + (code == 200 ? " ✓" : "");
+                } catch (Exception e) {
+                    msg = "Error: " + e.getMessage();
+                }
+                final String fmsg = msg;
+                new Handler(Looper.getMainLooper()).post(
+                        () -> Toast.makeText(this, fmsg, Toast.LENGTH_LONG).show());
+            }).start();
         });
 
         requestSmsPermission();
@@ -73,9 +98,9 @@ public class MainActivity extends Activity {
             s.append("Apna number daal kar Save dabayein.");
         } else {
             s.append("Registered number: ").append(num).append("\n");
-            s.append(smsOk ? "✓ SMS permission diya gaya — app active hai."
-                           : "⚠ SMS permission chahiye. Save dabayein aur Allow karein.");
-            s.append("\n\nApp ko khula rakhne ki zaroorat nahi — background mein OTP forward hoti rahegi.");
+            s.append(smsOk ? "✓ SMS permission OK — app active hai."
+                           : "⚠ SMS permission NAHI mili. Save dabayein aur Allow karein,\nya Settings → Apps → OTP Forwarder → Permissions → SMS → Allow.");
+            s.append("\n\nXiaomi/Infinix/Realme/Oppo par: app ki settings mein 'Autostart' ON karein,\naur battery ko 'No restrictions' karein — warna background SMS nahi parhega.");
         }
         status.setText(s.toString());
     }

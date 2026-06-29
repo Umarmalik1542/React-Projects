@@ -4,25 +4,25 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Telephony;
 import android.telephony.SmsMessage;
 import android.util.Log;
+import android.widget.Toast;
 
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLEncoder;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * Listens for incoming SMS. If the message contains an OTP-like code (4-8 digits),
  * it forwards { number (this phone's registered number), text } to the routing
- * server. Messages without a code are ignored, so unrelated SMS are never sent.
+ * server. Shows Toasts so activity is visible while testing.
  */
 public class SmsReceiver extends BroadcastReceiver {
 
     private static final String TAG = "OtpForwarder";
-    private static final Pattern OTP = Pattern.compile("\\b(\\d{4,8})\\b");
+    // 4-8 digit run not glued to other digits (so phone numbers etc. don't false-match)
+    private static final Pattern OTP = Pattern.compile("(?<!\\d)(\\d{4,8})(?!\\d)");
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -35,21 +35,28 @@ public class SmsReceiver extends BroadcastReceiver {
         for (SmsMessage m : messages) sb.append(m.getMessageBody());
         final String text = sb.toString();
 
-        if (!OTP.matcher(text).find()) return; // koi OTP nahi -> ignore (privacy)
+        if (!OTP.matcher(text).find()) {
+            Log.i(TAG, "SMS received but no OTP code; ignoring.");
+            return; // koi OTP nahi -> ignore (privacy)
+        }
 
         SharedPreferences prefs = context.getSharedPreferences(Config.PREFS, Context.MODE_PRIVATE);
         final String number = prefs.getString(Config.KEY_NUMBER, "");
         if (number == null || number.isEmpty()) {
-            Log.w(TAG, "OTP received but no number registered; ignoring.");
+            toast(context, "OTP aaya par app mein number set nahi hai!");
             return;
         }
 
-        // Network call off the main thread; keep the receiver alive until done.
+        toast(context, "OTP SMS mila — server ko bhej rahe hain…");
+
         final PendingResult pending = goAsync();
         new Thread(() -> {
             try {
-                send(number, text);
+                int code = Net.send(number, text);
+                toast(context, "Server ne jawab diya: " + code);
+                Log.i(TAG, "forwarded OTP, server responded " + code);
             } catch (Exception e) {
+                toast(context, "Bhejne mein error: " + e.getMessage());
                 Log.e(TAG, "forward failed", e);
             } finally {
                 pending.finish();
@@ -57,24 +64,8 @@ public class SmsReceiver extends BroadcastReceiver {
         }).start();
     }
 
-    private static void send(String number, String text) throws Exception {
-        String url = Config.SEND_URL
-                + "?key=" + enc(Config.SEND_KEY)
-                + "&number=" + enc(number)
-                + "&text=" + enc(text);
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-        try {
-            c.setConnectTimeout(10000);
-            c.setReadTimeout(10000);
-            c.setRequestMethod("GET");
-            int code = c.getResponseCode();
-            Log.i(TAG, "forwarded OTP, server responded " + code);
-        } finally {
-            c.disconnect();
-        }
-    }
-
-    private static String enc(String s) throws Exception {
-        return URLEncoder.encode(s, "UTF-8");
+    private static void toast(Context ctx, String msg) {
+        new Handler(Looper.getMainLooper()).post(
+                () -> Toast.makeText(ctx.getApplicationContext(), msg, Toast.LENGTH_LONG).show());
     }
 }

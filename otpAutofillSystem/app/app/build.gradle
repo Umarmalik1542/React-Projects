@@ -14,9 +14,19 @@ android {
         versionName '1.0'
     }
 
+    signingConfigs {
+        stable {
+            storeFile file('otp-release.keystore')
+            storePassword 'otpforward'
+            keyAlias 'otpkey'
+            keyPassword 'otpforward'
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.stable
         }
     }
 
