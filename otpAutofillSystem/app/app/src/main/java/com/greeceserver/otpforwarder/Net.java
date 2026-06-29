@@ -14,13 +14,30 @@ public final class Net {
                 + "&text=" + enc(text);
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         try {
-            c.setConnectTimeout(10000);
-            c.setReadTimeout(10000);
+            c.setConnectTimeout(5000);
+            c.setReadTimeout(5000);
             c.setRequestMethod("GET");
             return c.getResponseCode();
         } finally {
             c.disconnect();
         }
+    }
+
+    /** Try a few times so a transient network blip doesn't lose the OTP. */
+    public static int sendWithRetry(String number, String text, int attempts) {
+        int last = -1;
+        for (int i = 1; i <= attempts; i++) {
+            try {
+                last = send(number, text);
+                if (last == 200) return 200;
+            } catch (Exception e) {
+                last = -1;
+            }
+            if (i < attempts) {
+                try { Thread.sleep(900); } catch (InterruptedException ignored) {}
+            }
+        }
+        return last;
     }
 
     private static String enc(String s) throws Exception {

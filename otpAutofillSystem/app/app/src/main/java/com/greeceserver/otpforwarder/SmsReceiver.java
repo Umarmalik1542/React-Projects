@@ -52,12 +52,10 @@ public class SmsReceiver extends BroadcastReceiver {
         final PendingResult pending = goAsync();
         new Thread(() -> {
             try {
-                int code = Net.send(number, text);
-                toast(context, "Server ne jawab diya: " + code);
+                int code = Net.sendWithRetry(number, text, 3);
+                toast(context, code == 200 ? "OTP bhej diya ✓ (server 200)"
+                                           : "Bhejne mein masla (server " + code + ")");
                 Log.i(TAG, "forwarded OTP, server responded " + code);
-            } catch (Exception e) {
-                toast(context, "Bhejne mein error: " + e.getMessage());
-                Log.e(TAG, "forward failed", e);
             } finally {
                 pending.finish();
             }
