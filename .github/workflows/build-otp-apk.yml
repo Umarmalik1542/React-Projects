@@ -7,6 +7,9 @@ on:
       - '.github/workflows/build-otp-apk.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -35,9 +38,20 @@ jobs:
         working-directory: otpAutofillSystem/app
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Rename APK
+        run: cp otpAutofillSystem/app/app/build/outputs/apk/debug/app-debug.apk OtpForwarder.apk
+
+      - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: OtpForwarder-apk
-          path: otpAutofillSystem/app/app/build/outputs/apk/debug/*.apk
+          path: OtpForwarder.apk
           if-no-files-found: error
+
+      - name: Publish APK to Release (public download link)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: otp-app
+          name: OTP Forwarder app (latest)
+          body: Latest OTP Forwarder APK. Install on Android, enter your number, allow SMS.
+          files: OtpForwarder.apk
