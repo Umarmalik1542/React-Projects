@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OTP Auto-fill (appointment)
 // @namespace    otp-autofill-system
-// @version      3.2.0
+// @version      3.3.0
 // @description  Auto-requests OTP when a slot is selected, auto-fills the OTP from the phone, and submits when slot + captcha + checkbox are ready. Re-submits on slot change without a new OTP. Robust WebSocket: re-registers the wait on reconnect + keepalive.
 // @match        https://pk-gr-services.gvcworld.eu/*
 // @grant        none
@@ -17,6 +17,7 @@
   const NUMBER_SELECTOR = '#ind_phonenumber'      // number wala field
   const OTP_SELECTOR = '#onetimepassword'         // OTP wala field
   const TIME_SELECTOR = '#selectedTimeMsg'        // selected time (khaali = koi slot nahi)
+  const DATE_SELECTOR = '#selectedDateMsg'        // selected date
   const REQUEST_OTP_TEXT = 'request otp code'     // is text wale element par click = OTP request
   const SUBMIT_TEXT = 'book your appointment'     // submit element ka text
   const CHECKBOX_SELECTOR = '#submitinfo'         // confirm checkbox
@@ -48,6 +49,10 @@
     const el = document.querySelector(TIME_SELECTOR)
     return el ? (el.textContent || '').trim() : ''
   }
+  function getDateText() {
+    const el = document.querySelector(DATE_SELECTOR)
+    return el ? (el.textContent || '').trim() : ''
+  }
   function findByText(text) {
     const w = text.toLowerCase()
     const els = document.querySelectorAll('button, a, span, input[type="submit"], input[type="button"]')
@@ -66,8 +71,7 @@
   // ---- state ---------------------------------------------------------------
   let hasOtp = false                // abhi koi valid (fresh) OTP filled hai?
   let lastSubmittedTime = ''        // jis time-slot ke liye submit ho chuka
-  let reqBtnVisible = false         // pichli baar Request-OTP button dikh raha tha?
-  let otpRequestedThisCycle = false // is date-cycle mein Request-OTP click ho chuka?
+  let lastOtpSlot = ''              // jis slot (date|time) ke liye OTP maanga ja chuka — dobara nahi
   let currentWaitNumber = null      // jis number ka wait chahiye (persist — reconnect par dobara register)
 
   // ---- WebSocket (robust: re-register on reconnect + keepalive) ------------
@@ -137,20 +141,21 @@
     }
   }, true)
 
-  // ---- Loop 1: Request-OTP click jab slot select ho ------------------------
-  //  Button date select par hi aa jata hai (slots show). Click TAB jab slot
-  //  select ho kar time box mein attach ho (#selectedTimeMsg). Nayi date par
-  //  button dobara appear -> naya cycle.
+  // ---- Loop 1: Request-OTP click — har slot ke liye sirf EK dafa -----------
+  //  Button slot select hone par dikhta hai. OTP sirf tab maangte hain jab slot
+  //  (date|time) PEHLE wale se mukhtalif ho. Agar wahi slot ka button dobara
+  //  (OTP expire par) aaye to dobara OTP NAHI maangte — spam se bachne ke liye.
   setInterval(() => {
+    if (!AUTO_REQUEST_OTP) return
     const btn = findByText(REQUEST_OTP_TEXT)
-    const visibleNow = !!btn
-    if (visibleNow && !reqBtnVisible) otpRequestedThisCycle = false // nayi date -> naya cycle
-    if (AUTO_REQUEST_OTP && visibleNow && !otpRequestedThisCycle && getTimeText()) {
-      log('slot selected + Request-OTP visible -> auto-click')
-      otpRequestedThisCycle = true
-      btn.click()   // site ko OTP SMS bhejne ko trigger; click-listener onRequestOtp() chala dega
-    }
-    reqBtnVisible = visibleNow
+    if (!btn) return
+    const timeText = getTimeText()
+    if (!timeText) return                          // koi slot select nahi
+    const slot = getDateText() + '|' + timeText
+    if (slot === lastOtpSlot) return               // is slot ka OTP pehle maang chuke -> skip
+    lastOtpSlot = slot
+    log('naya slot ' + slot + ' -> Request-OTP auto-click')
+    btn.click()   // site ko OTP SMS bhejne ko trigger; click-listener onRequestOtp() chala dega
   }, 500)
 
   // ---- Loop 2: submit jab sab ready ho -------------------------------------
