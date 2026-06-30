@@ -53,9 +53,15 @@ public class SmsReceiver extends BroadcastReceiver {
         new Thread(() -> {
             try {
                 int code = Net.sendWithRetry(number, text, 3);
-                toast(context, code == 200 ? "OTP bhej diya ✓ (server 200)"
-                                           : "Bhejne mein masla (server " + code + ")");
-                Log.i(TAG, "forwarded OTP, server responded " + code);
+                if (code == 200) {
+                    toast(context, "OTP bhej diya ✓");
+                } else {
+                    // net nahi/server fail -> queue karo, internet aate hi bhej denge
+                    Queue.add(context, number, text);
+                    OtpUploadJob.schedule(context);
+                    toast(context, "Net nahi — OTP queue mein, internet aate hi bhej denge");
+                }
+                Log.i(TAG, "forward result " + code);
             } finally {
                 pending.finish();
             }
