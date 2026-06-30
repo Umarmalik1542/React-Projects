@@ -12,13 +12,32 @@ existing nginx, and is reachable over HTTPS/WSS.
 | Auto-start | Windows Task Scheduler task `OtpServer` | runs as SYSTEM, at startup, restarts on crash |
 
 ## Public endpoints
-- Phone → `POST/GET https://greeceserver.com/otp-send?key=<SEND_KEY>&number=<num>&text=<sms>`
+- Phone OTP → `POST/GET https://greeceserver.com/otp-send?key=<SEND_KEY>&number=<num>&text=<sms>`
+- Phone register/heartbeat → `https://greeceserver.com/otp-register?key=<SEND_KEY>&number=<num>&ver=<v>`
 - Browser extension → `wss://greeceserver.com/otp-ws` (sends `key=<ADMIN_KEY>`)
+- Clients dashboard → `https://greeceserver.com/otp-clients` (password login)
 
-## Keys (in `index.js`)
-- `ADMIN_KEY` — only the operator's browser extension has it (register waits / receive OTP).
-- `SEND_KEY` — the phone app has it (send OTP).
-- Change both to your own random strings; keep `ADMIN_KEY` private.
+nginx needs all four locations: `/otp-ws`, `/otp-send`, `/otp-register`, `/otp-clients`
+(each `proxy_pass http://127.0.0.1:5000/<ws|otp|register|clients>`).
+
+## Clients dashboard
+- Open `https://greeceserver.com/otp-clients` → enter `DASH_PASSWORD` (cookie-remembered 30d).
+- Shows each client: number, app version, registered, last seen, last OTP, active/inactive.
+- Active = seen (register/heartbeat/OTP) within 12h. Per-row `✕ remove` deletes an entry.
+- Registry persists to `clients.json`.
+
+## Keys / password (in `index.js`)
+- `ADMIN_KEY` — browser extension (waits) + legacy `?key=` dashboard access. Keep private.
+- `SEND_KEY` — phone app (OTP send + register).
+- `DASH_PASSWORD` — dashboard login (default `greece123` — change it).
+- Change to your own values; restart the service after editing.
+
+## App auto-update
+- The workflow publishes `version.txt` (latest `versionCode`) next to `OtpForwarder.apk`
+  on the `otp-app` release.
+- The app checks `version.txt` on open / via "Check for Update"; if newer it downloads
+  the APK and launches the installer. First install of an updater-capable build is manual;
+  later updates are one-tap.
 
 ## nginx — added inside the `listen 443 ssl` server block
 ```nginx
