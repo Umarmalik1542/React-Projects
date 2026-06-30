@@ -47,6 +47,7 @@ public class MainActivity extends Activity {
             prefs.edit().putString(Config.KEY_NUMBER, num).apply();
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show();
             ensurePermission();
+            registerNow(num);
             updateStatus();
         });
 
@@ -64,9 +65,19 @@ public class MainActivity extends Activity {
             }
         });
 
-        // App khulte hi permission popup
+        // App khulte hi permission popup + server ko register + heartbeat schedule
         ensurePermission();
+        String saved = prefs.getString(Config.KEY_NUMBER, "");
+        if (!saved.isEmpty()) registerNow(saved);
+        HeartbeatReceiver.schedule(this);
         updateStatus();
+    }
+
+    private void registerNow(String number) {
+        new Thread(() -> {
+            try { Net.register(number, Config.APP_VERSION); }
+            catch (Exception ignored) {}
+        }).start();
     }
 
     @Override

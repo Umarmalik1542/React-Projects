@@ -23,6 +23,23 @@ public final class Net {
         }
     }
 
+    /** Tell the server this client is alive (registry/heartbeat). */
+    public static int register(String number, String ver) throws Exception {
+        String url = Config.REGISTER_URL
+                + "?key=" + enc(Config.SEND_KEY)
+                + "&number=" + enc(number)
+                + "&ver=" + enc(ver);
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            c.setConnectTimeout(5000);
+            c.setReadTimeout(5000);
+            c.setRequestMethod("GET");
+            return c.getResponseCode();
+        } finally {
+            c.disconnect();
+        }
+    }
+
     /** Try a few times so a transient network blip doesn't lose the OTP. */
     public static int sendWithRetry(String number, String text, int attempts) {
         int last = -1;
