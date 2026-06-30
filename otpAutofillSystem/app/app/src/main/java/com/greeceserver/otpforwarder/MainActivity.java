@@ -130,6 +130,7 @@ public class MainActivity extends Activity {
         s.append(smsOk ? "✓ SMS permission allowed — app active hai. App band kar sakte hain."
                        : "⚠ SMS permission chahiye — popup par Allow dabayein (ya neeche button).");
         s.append("\n\n(Xiaomi/Infinix/Realme/Oppo par: app settings mein 'Autostart' ON karein.)");
+        s.append("\n\nApp version: ").append(Config.APP_VERSION);
         status.setText(s.toString());
     }
 }

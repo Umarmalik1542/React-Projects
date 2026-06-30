@@ -8,7 +8,7 @@ public final class Config {
     // Must equal SEND_KEY on the server.
     public static final String SEND_KEY = "gr-send-4Tn8Lm3Vy";
 
-    public static final String APP_VERSION = "1.3";
+    public static final String APP_VERSION = "1.5";
 
     public static final String PREFS = "otp_prefs";
     public static final String KEY_NUMBER = "number";
