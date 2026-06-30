@@ -34,6 +34,7 @@ public class MainActivity extends Activity {
         status = findViewById(R.id.status);
         Button saveBtn = findViewById(R.id.saveBtn);
         Button permBtn = findViewById(R.id.permBtn);
+        Button updateBtn = findViewById(R.id.updateBtn);
 
         final SharedPreferences prefs = getSharedPreferences(Config.PREFS, MODE_PRIVATE);
         numberInput.setText(prefs.getString(Config.KEY_NUMBER, ""));
@@ -65,11 +66,14 @@ public class MainActivity extends Activity {
             }
         });
 
-        // App khulte hi permission popup + server ko register + heartbeat schedule
+        updateBtn.setOnClickListener(v -> Updater.checkAsync(this, true));
+
+        // App khulte hi permission popup + register + heartbeat + update check
         ensurePermission();
         String saved = prefs.getString(Config.KEY_NUMBER, "");
         if (!saved.isEmpty()) registerNow(saved);
         HeartbeatReceiver.schedule(this);
+        Updater.checkAsync(this, false);
         updateStatus();
     }
 

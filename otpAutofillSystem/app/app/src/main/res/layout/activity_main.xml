@@ -40,6 +40,13 @@
         android:layout_marginTop="8dp"
         android:text="Allow SMS Permission" />
 
+    <Button
+        android:id="@+id/updateBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Check for Update" />
+
     <TextView
         android:id="@+id/status"
         android:layout_width="match_parent"

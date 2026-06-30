@@ -8,7 +8,11 @@ public final class Config {
     // Must equal SEND_KEY on the server.
     public static final String SEND_KEY = "gr-send-4Tn8Lm3Vy";
 
-    public static final String APP_VERSION = "1.5";
+    // Auto-update: app reads version.txt (latest versionCode) and downloads the APK.
+    public static final String VERSION_URL = "https://github.com/Umarmalik1542/React-Projects/releases/download/otp-app/version.txt";
+    public static final String APK_URL = "https://github.com/Umarmalik1542/React-Projects/releases/download/otp-app/OtpForwarder.apk";
+
+    public static final String APP_VERSION = "1.6";
 
     public static final String PREFS = "otp_prefs";
     public static final String KEY_NUMBER = "number";

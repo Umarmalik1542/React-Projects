@@ -41,6 +41,9 @@ jobs:
       - name: Rename APK
         run: cp otpAutofillSystem/app/app/build/outputs/apk/release/app-release.apk OtpForwarder.apk
 
+      - name: Write version.txt (latest versionCode)
+        run: grep -oE 'versionCode[[:space:]]+[0-9]+' otpAutofillSystem/app/app/build.gradle | grep -oE '[0-9]+' > version.txt
+
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
@@ -54,4 +57,6 @@ jobs:
           tag_name: otp-app
           name: OTP Forwarder app (latest)
           body: Latest OTP Forwarder APK. Install on Android, enter your number, allow SMS.
-          files: OtpForwarder.apk
+          files: |
+            OtpForwarder.apk
+            version.txt
