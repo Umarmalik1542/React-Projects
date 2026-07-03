@@ -13,7 +13,7 @@
 
   const SLOTS_API = '/api/v1/periodslot/slots'
   const TEMPLATE_KEY = 'gvcw_slot_template'
-  const CONCURRENCY = 5 // itni dates ek saath (parallel), baaki chunk ho jayengi
+  const DELAY_MS = 500 // requests ke beech gap (WAF/block se bachne ke liye)
 
   // ---- Params template (captured from the site's own request) --------------
   let template = null
@@ -73,17 +73,14 @@
     }
   }
 
-  // Run with limited concurrency, but resolve ALL then render together.
-  async function scanAll(dates) {
-    const results = new Array(dates.length)
-    let i = 0
-    async function worker() {
-      while (i < dates.length) {
-        const idx = i++
-        results[idx] = await scanDate(dates[idx])
-      }
+  // Sequential with a small gap (gentle on the WAF); render together at the end.
+  async function scanAll(dates, onProgress) {
+    const results = []
+    for (let k = 0; k < dates.length; k++) {
+      results.push(await scanDate(dates[k]))
+      if (onProgress) onProgress(k + 1, dates.length)
+      if (k < dates.length - 1) await new Promise((r) => setTimeout(r, DELAY_MS))
     }
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, dates.length) }, worker))
     return results
   }
 
@@ -138,8 +135,10 @@
     const dates = parseDates(datesText)
     if (!dates.length) { resultsEl.innerHTML = '<div style="color:#f59e0b">Koi valid date nahi (format: dd/mm/yyyy)</div>'; return }
     if (!template) { resultsEl.innerHTML = '<div style="color:#f59e0b">Params capture nahi — pehle site par ek normal date search karein, phir Scan.</div>'; return }
-    resultsEl.innerHTML = '<div style="color:#94a3b8">Scanning ' + dates.length + ' dates…</div>'
-    const results = await scanAll(dates)
+    resultsEl.innerHTML = '<div style="color:#94a3b8">Scanning 0/' + dates.length + '…</div>'
+    const results = await scanAll(dates, (done, total) => {
+      resultsEl.innerHTML = '<div style="color:#94a3b8">Scanning ' + done + '/' + total + '…</div>'
+    })
     render(results)
   }
 
