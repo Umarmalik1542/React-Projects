@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OTP Auto-fill (appointment)
 // @namespace    otp-autofill-system
-// @version      3.3.0
+// @version      3.4.0
 // @description  Auto-requests OTP when a slot is selected, auto-fills the OTP from the phone, and submits when slot + captcha + checkbox are ready. Re-submits on slot change without a new OTP. Robust WebSocket: re-registers the wait on reconnect + keepalive.
 // @match        https://pk-gr-services.gvcworld.eu/*
 // @grant        none
@@ -71,7 +71,7 @@
   // ---- state ---------------------------------------------------------------
   let hasOtp = false                // abhi koi valid (fresh) OTP filled hai?
   let lastSubmittedTime = ''        // jis time-slot ke liye submit ho chuka
-  let lastOtpSlot = ''              // jis slot (date|time) ke liye OTP maanga ja chuka — dobara nahi
+  let lastOtpDate = ''             // jis DATE ke liye OTP maanga ja chuka — usi date par dobara nahi
   let currentWaitNumber = null      // jis number ka wait chahiye (persist — reconnect par dobara register)
 
   // ---- WebSocket (robust: re-register on reconnect + keepalive) ------------
@@ -151,10 +151,10 @@
     if (!btn) return
     const timeText = getTimeText()
     if (!timeText) return                          // koi slot select nahi
-    const slot = getDateText() + '|' + timeText
-    if (slot === lastOtpSlot) return               // is slot ka OTP pehle maang chuke -> skip
-    lastOtpSlot = slot
-    log('naya slot ' + slot + ' -> Request-OTP auto-click')
+    const dateNow = getDateText()
+    if (dateNow === lastOtpDate) return            // is DATE ka OTP pehle maang chuke -> skip (time change par nahi)
+    lastOtpDate = dateNow
+    log('nayi date ' + dateNow + ' -> Request-OTP auto-click')
     btn.click()   // site ko OTP SMS bhejne ko trigger; click-listener onRequestOtp() chala dega
   }, 500)
 
