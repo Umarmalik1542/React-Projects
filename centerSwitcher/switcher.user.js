@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GVCW Center Switcher (ISB / LHR)
 // @namespace    gvcw-center-switcher
-// @version      2.0.0
+// @version      2.1.0
 // @description  Ek click par apna appointment center Islamabad (ISB=137) ya Lahore (LHR=138) badlo. Profile browser storage se khud-ba-khud milti hai — Manage Account kholne ki zaroorat nahi. Draggable panel, no page reload.
 // @match        https://pk-gr-services.gvcworld.eu/*
 // @run-at       document-start
@@ -75,18 +75,38 @@
     if (parts.length !== 3) return null
     try { return JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))) } catch { return null }
   }
-  function findUserId() {
-    if (profile && profile.id != null) return profile.id
+  // current session ka auth token (Bearer) storage se dhoondo — taake request
+  // MOJOODA logged-in account ke naam par jaye (chahe cache purani ho).
+  const isJwt = (s) => typeof s === 'string' && s.split('.').length === 3 && !!decodeJwt(s)
+  function getAuthToken() {
     for (const store of [localStorage, sessionStorage]) {
       for (let i = 0; i < store.length; i++) {
         let v
         try { v = store.getItem(store.key(i)) } catch { continue }
-        const jwt = decodeJwt(v)
-        const id = jwt && (jwt.id || jwt.userId || jwt.userid || jwt.uid)
-        if (id != null && /^\d+$/.test(String(id))) return id
+        if (!v) continue
+        if (isJwt(v)) return v
+        if (v[0] === '{') {
+          try {
+            const o = JSON.parse(v)
+            for (const f of ['access_token', 'accessToken', 'token', 'id_token', 'idToken', 'jwt', 'authToken']) {
+              if (o && o[f] && isJwt(o[f])) return o[f]
+            }
+          } catch {}
+        }
       }
     }
     return null
+  }
+  function tokenUserId(tok) {
+    const j = decodeJwt(tok || getAuthToken())
+    const id = j && (j.id || j.userId || j.userid || j.uid || j.sub)
+    return id != null && /^\d+$/.test(String(id)) ? String(id) : null
+  }
+  function authHeaders() {
+    const h = { 'content-type': 'application/json; charset=UTF-8', 'x-requested-with': 'XMLHttpRequest', accept: 'application/json' }
+    const t = getAuthToken()
+    if (t) h['Authorization'] = 'Bearer ' + t
+    return h
   }
   async function fetchById(id) {
     const attempts = [
@@ -96,12 +116,7 @@
     ]
     for (const a of attempts) {
       try {
-        const res = await origFetch(a.u, {
-          method: a.m,
-          headers: { 'content-type': 'application/json; charset=UTF-8', 'x-requested-with': 'XMLHttpRequest', accept: 'application/json' },
-          credentials: 'include',
-          body: a.body,
-        })
+        const res = await origFetch(a.u, { method: a.m, headers: authHeaders(), credentials: 'include', body: a.body })
         if (!res.ok) continue
         const j = await res.json()
         const p = digProfile(j, true)
@@ -111,12 +126,14 @@
     return null
   }
 
-  // profile pakka karo: cache -> storage scan -> id-fetch
+  // profile pakka karo — hamesha MOJOODA session se match karti profile do:
+  //  purani cache agar doosre account ki ho to discard; storage/id-fetch se current lo.
   async function ensureProfile() {
-    if (scanStorage && !profile) { const s = scanStorage(); if (s) setProfile(s) }
-    if (profile) return profile
-    const id = findUserId()
-    if (id != null) { const p = await fetchById(id); if (p) setProfile(p) }
+    const tid = tokenUserId()                                  // current logged-in id
+    if (profile && tid && String(profile.id) !== tid) profile = null   // cross-account cache -> hatao
+    if (!profile) { const s = scanStorage(); if (s && (!tid || String(s.id) === tid)) setProfile(s) }
+    if (!profile && tid) { const p = await fetchById(tid); if (p) setProfile(p) }
+    if (!profile) { const s = scanStorage(); if (s) setProfile(s) }   // last resort (no token)
     return profile
   }
 
@@ -160,11 +177,18 @@
         toast('⚠️ Profile nahi mili — ek dafa "Manage Account" kholo', '#f59e0b')
         return
       }
+      // safety: jis account me logged-in ho usi ka profile PUT ho (warna PERMISSION)
+      const tid = tokenUserId()
+      if (tid && String(profile.id) !== tid) {
+        toast('❌ Account badla hua — page refresh karke dobara try karo', '#ef4444')
+        profile = null
+        return
+      }
       const currentVac = profile.vac && profile.vac.id != null ? String(profile.vac.id) : null
       const body = { ...profile, vac: { ...(profile.vac || {}), id: target.id } }  // sirf vac.id
       const res = await origFetch(USER_API, {
         method: 'PUT',
-        headers: { 'content-type': 'application/json; charset=UTF-8', 'x-requested-with': 'XMLHttpRequest', accept: 'application/json' },
+        headers: authHeaders(),
         credentials: 'include',
         body: JSON.stringify(body),
       })
