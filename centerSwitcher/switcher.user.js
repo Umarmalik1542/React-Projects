@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GVCW Center Switcher (ISB / LHR)
 // @namespace    gvcw-center-switcher
-// @version      1.1.0
+// @version      1.2.0
 // @description  Ek click par apna appointment center Islamabad (ISB=137) ya Lahore (LHR=138) badlo. Profile site ke apne traffic se auto-capture hoti hai (Manage Account ek dafa kholo), phir sirf vac.id badal ke PUT ho jata hai. Manual Save ki zaroorat nahi.
 // @match        https://pk-gr-services.gvcworld.eu/*
 // @run-at       document-start
@@ -111,9 +111,15 @@
       if (ok) {
         profile = body                                  // local cache update
         localStorage.setItem(CACHE_KEY, JSON.stringify(body))
-        toast('✅ Center → ' + target.label + (currentVac === target.id ? ' (already)' : ''), '#16a34a')
         markActive(key)
         log('switched to', target.label, j)
+        if (currentVac === target.id) {
+          toast('✅ Center → ' + target.label + ' (already)', '#16a34a')
+        } else {
+          // site UI purana center dikhati hai jab tak reload na ho -> khud reload
+          toast('✅ ' + target.label + ' — reloading…', '#16a34a')
+          setTimeout(() => location.reload(), 900)
+        }
       } else {
         const msg = (j && (j.message || j.error)) || ('HTTP ' + res.status)
         toast('❌ ' + msg, '#ef4444')
