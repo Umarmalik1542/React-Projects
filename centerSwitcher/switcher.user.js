@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GVCW Center Switcher (ISB / LHR)
 // @namespace    gvcw-center-switcher
-// @version      2.1.0
+// @version      2.2.0
 // @description  Ek click par apna appointment center Islamabad (ISB=137) ya Lahore (LHR=138) badlo. Profile browser storage se khud-ba-khud milti hai — Manage Account kholne ki zaroorat nahi. Draggable panel, no page reload.
 // @match        https://pk-gr-services.gvcworld.eu/*
 // @run-at       document-start
@@ -19,6 +19,8 @@
   }
   const CACHE_KEY = 'gvcw_profile_cache'
   const POS_KEY = 'gvcw_panel_pos'
+  const TPL_KEY = 'gvcw_profile_fetch_tpl'   // site ki profile-fetch request ka template
+  const OWN_KEYS = new Set([CACHE_KEY, POS_KEY, TPL_KEY])
   // ==========================================================================
 
   const log = (...a) => console.log('%c[Center]', 'color:#0ea5e9;font-weight:bold', ...a)
@@ -44,21 +46,25 @@
     if (test(inner)) return inner
     return null
   }
-  function setProfile(p) {
+  let profileFresh = false   // kya mojooda `profile` is session/page ke liye confirm-shuda hai?
+  function setProfile(p, fresh) {
     if (!p) return false
     profile = p
+    if (fresh) profileFresh = true
     try { localStorage.setItem(CACHE_KEY, JSON.stringify(p)) } catch {}
     setCaptured(true)
     highlightCurrent()
     return true
   }
 
-  // 1) browser storage se profile dhoondo (Manage Account ki zaroorat nahi)
+  // 1) browser storage se profile dhoondo (apni keys chhod ke — warna apni hi purani cache utha lega!)
   function scanStorage() {
     for (const store of [localStorage, sessionStorage]) {
       for (let i = 0; i < store.length; i++) {
+        const k = store.key(i)
+        if (OWN_KEYS.has(k)) continue
         let v
-        try { v = store.getItem(store.key(i)) } catch { continue }
+        try { v = store.getItem(k) } catch { continue }
         if (!v || (v[0] !== '{' && v[0] !== '[')) continue
         try {
           const p = digProfile(JSON.parse(v), true)
@@ -67,6 +73,34 @@
       }
     }
     return null
+  }
+
+  // site ki apni profile-fetch request ka template (Manage Account ne jo call ki)
+  function saveTemplate(method, url, body) {
+    try {
+      if (!method || !url) return
+      const m = String(method).toUpperCase()
+      if (m === 'PUT') return                       // hamari update call nahi
+      if (!String(url).includes('/api/v1/user')) return
+      localStorage.setItem(TPL_KEY, JSON.stringify({ method: m, url: String(url), body: body != null ? String(body) : null }))
+    } catch {}
+  }
+  // template ko current cookie/token ke sath dobara chala ke FRESH current profile lao
+  async function replayTemplate() {
+    let tpl
+    try { tpl = JSON.parse(localStorage.getItem(TPL_KEY) || 'null') } catch {}
+    if (!tpl || !tpl.url) return null
+    try {
+      const res = await origFetch(tpl.url, {
+        method: tpl.method || 'GET',
+        headers: authHeaders(),
+        credentials: 'include',
+        body: (tpl.method === 'POST' || tpl.method === 'PUT') ? (tpl.body != null ? tpl.body : '{}') : undefined,
+      })
+      if (!res.ok) return null
+      const j = await res.json()
+      return digProfile(j, true)
+    } catch { return null }
   }
 
   // 2) JWT se userId + POST /api/v1/user/{id} (Manage Account jaisa) se fresh profile
@@ -126,36 +160,55 @@
     return null
   }
 
-  // profile pakka karo — hamesha MOJOODA session se match karti profile do:
-  //  purani cache agar doosre account ki ho to discard; storage/id-fetch se current lo.
+  // profile pakka karo — hamesha MOJOODA session ka FRESH profile lene ki koshish:
+  //  1) site ki apni profile-fetch replay (best)  2) storage scan  3) token-id fetch.
   async function ensureProfile() {
-    const tid = tokenUserId()                                  // current logged-in id
+    profileFresh = false
+    const tid = tokenUserId()
     if (profile && tid && String(profile.id) !== tid) profile = null   // cross-account cache -> hatao
-    if (!profile) { const s = scanStorage(); if (s && (!tid || String(s.id) === tid)) setProfile(s) }
-    if (!profile && tid) { const p = await fetchById(tid); if (p) setProfile(p) }
-    if (!profile) { const s = scanStorage(); if (s) setProfile(s) }   // last resort (no token)
-    return profile
+
+    const r = await replayTemplate()                       // 1) sabse behtar (current cookie)
+    if (r) { setProfile(r, true); return profile }
+
+    const s = scanStorage()                                // 2) site ka currentUser storage me
+    if (s && (!tid || String(s.id) === tid)) { setProfile(s, true); return profile }
+
+    if (tid) { const p = await fetchById(tid); if (p) { setProfile(p, true); return profile } }  // 3)
+
+    return profile   // sirf purani cache (profileFresh=false) — PUT se pehle rok denge
   }
 
   // ---- hook fetch/XHR (always-on updater) ----------------------------------
   const origFetch = window.fetch
   window.fetch = function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || ''
-    if (url.includes('/api/v1/user') && init && init.body) { const p = digProfile(safeJson(init.body)); if (p) setProfile(p) }
+    const method = (init && init.method) || 'GET'
+    if (url.includes('/api/v1/user') && init && init.body) { const p = digProfile(safeJson(init.body)); if (p) setProfile(p, true) }
     const pr = origFetch.apply(this, arguments)
     if (url.includes('/api/v1/user')) {
-      pr.then((res) => { try { res.clone().json().then((j) => { const p = digProfile(j); if (p) setProfile(p) }).catch(() => {}) } catch {} }).catch(() => {})
+      pr.then((res) => {
+        try {
+          res.clone().json().then((j) => {
+            const p = digProfile(j)
+            if (p) { setProfile(p, true); saveTemplate(method, url, init && init.body) }
+          }).catch(() => {})
+        } catch {}
+      }).catch(() => {})
     }
     return pr
   }
   const XO = XMLHttpRequest.prototype.open, XS = XMLHttpRequest.prototype.send
-  XMLHttpRequest.prototype.open = function (m, u) { this.__u = u || ''; return XO.apply(this, arguments) }
+  XMLHttpRequest.prototype.open = function (m, u) { this.__u = u || ''; this.__m = m || 'GET'; return XO.apply(this, arguments) }
   XMLHttpRequest.prototype.send = function (body) {
     try {
       if (String(this.__u).includes('/api/v1/user')) {
-        if (body) { const p = digProfile(safeJson(body)); if (p) setProfile(p) }
+        if (body) { const p = digProfile(safeJson(body)); if (p) setProfile(p, true) }
+        const self = this
         this.addEventListener('load', function () {
-          try { const p = digProfile(safeJson(this.responseText)); if (p) setProfile(p) } catch {}
+          try {
+            const p = digProfile(safeJson(self.responseText))
+            if (p) { setProfile(p, true); saveTemplate(self.__m, self.__u, body) }
+          } catch {}
         })
       }
     } catch {}
@@ -173,14 +226,16 @@
     toast('⏳ ' + target.label + ' set kar rahe…', '#f59e0b')
     try {
       await ensureProfile()
-      if (!profile) {
-        toast('⚠️ Profile nahi mili — ek dafa "Manage Account" kholo', '#f59e0b')
+      if (!profile || !profileFresh) {
+        // fresh current-account profile nahi mil saka -> ek dafa Manage Account kholo
+        // (uske baad template save ho jayega aur aage automatic chalega)
+        toast('⚠️ Ek dafa "Manage Account" kholo (sirf pehli baar)', '#f59e0b')
         return
       }
       // safety: jis account me logged-in ho usi ka profile PUT ho (warna PERMISSION)
       const tid = tokenUserId()
       if (tid && String(profile.id) !== tid) {
-        toast('❌ Account badla hua — page refresh karke dobara try karo', '#ef4444')
+        toast('❌ Account mismatch — Manage Account kholke dobara try karo', '#ef4444')
         profile = null
         return
       }
@@ -286,8 +341,12 @@
 
     setCaptured(!!profile)
     highlightCurrent()
-    // load par hi profile auto-dhoondo
-    ensureProfile().then(() => { setCaptured(!!profile); highlightCurrent() })
+    // load par hi FRESH profile auto-laane ki koshish (template replay / storage / id-fetch)
+    ensureProfile().then(() => {
+      highlightCurrent()
+      if (profileFresh) setCaptured(true)
+      else if (capBadge) { capBadge.textContent = '○ open Manage Account once'; capBadge.style.color = '#f59e0b' }
+    })
   }
 
   if (document.body) buildPanel()
