@@ -22,7 +22,8 @@ public class HeartbeatReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         if (intent != null && Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
-            schedule(context); // reboot ke baad alarm dobara lagao
+            schedule(context);              // reboot ke baad alarm dobara lagao
+            try { ForwarderService.start(context); } catch (Exception ignored) {} // service bhi zinda
         }
         SharedPreferences prefs = context.getSharedPreferences(Config.PREFS, Context.MODE_PRIVATE);
         final String number = prefs.getString(Config.KEY_NUMBER, "");

@@ -49,6 +49,7 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show();
             ensurePermission();
             registerNow(num);
+            ForwarderService.start(this);   // number set hote hi service on
             updateStatus();
         });
 
@@ -68,13 +69,23 @@ public class MainActivity extends Activity {
 
         updateBtn.setOnClickListener(v -> Updater.checkAsync(this, true));
 
-        // App khulte hi permission popup + register + heartbeat + update check
+        // App khulte hi permission popup + register + heartbeat + service + update check
         ensurePermission();
+        askNotificationPermission();
         String saved = prefs.getString(Config.KEY_NUMBER, "");
         if (!saved.isEmpty()) registerNow(saved);
         HeartbeatReceiver.schedule(this);
+        ForwarderService.start(this);        // foreground service — app zinda + online heartbeat
         Updater.checkAsync(this, false);
         updateStatus();
+    }
+
+    private void askNotificationPermission() {
+        // Android 13+ par foreground-service notification dikhane ke liye
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+            try { requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 2); } catch (Exception ignored) {}
+        }
     }
 
     private void registerNow(String number) {
@@ -131,9 +142,10 @@ public class MainActivity extends Activity {
         } else {
             s.append("Number: ").append(num).append("\n");
         }
-        s.append(smsOk ? "✓ SMS permission allowed — app active hai. App band kar sakte hain."
+        s.append(smsOk ? "✓ SMS permission allowed — app active hai."
                        : "⚠ SMS permission chahiye — popup par Allow dabayein (ya neeche button).");
-        s.append("\n\n(Xiaomi/Infinix/Realme/Oppo par: app settings mein 'Autostart' ON karein.)");
+        s.append("\n🟢 Online service chal rahi hai (notification me dikhegi). Isko band na karein.");
+        s.append("\n\n(Xiaomi/Infinix/Realme/Oppo par: app settings mein 'Autostart' ON aur Battery 'No restrictions' karein.)");
         s.append("\n\nApp version: ").append(Config.APP_VERSION);
         status.setText(s.toString());
     }

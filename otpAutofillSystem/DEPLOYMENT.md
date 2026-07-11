@@ -22,8 +22,10 @@ nginx needs all four locations: `/otp-ws`, `/otp-send`, `/otp-register`, `/otp-c
 
 ## Clients dashboard
 - Open `https://greeceserver.com/otp-clients` → enter `DASH_PASSWORD` (cookie-remembered 30d).
-- Shows each client: number, app version, registered, last seen, last OTP, active/inactive.
-- Active = seen (register/heartbeat/OTP) within 12h. Per-row `✕ remove` deletes an entry.
+- Shows each client: number, app version, registered, last seen, last OTP, status.
+- Status is **live**: 🟢 Online = seen in last 3 min · 🟡 Idle = last 12h · 🔴 Offline.
+  (App v1.8+ runs a foreground service that heartbeats every ~60s, so online is real-time.)
+- Header shows the online count; page auto-refreshes every 15s. Per-row `✕ remove` deletes an entry.
 - Registry persists to `clients.json`.
 
 ## Keys / password (in `index.js`)

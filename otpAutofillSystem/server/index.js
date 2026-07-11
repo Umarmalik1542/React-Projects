@@ -29,6 +29,7 @@ const WAIT_TTL_MS = 5 * 60 * 1000
 const ORPHAN_OTP_TTL_MS = 60 * 1000
 const ORPHAN_RACE_GRACE_MS = 10 * 1000
 const ACTIVE_WINDOW_MS = 12 * 60 * 60 * 1000
+const ONLINE_WINDOW_MS = 3 * 60 * 1000   // ~60s heartbeat -> 3 min ke andar = LIVE online
 
 const waits = new Map()
 const orphanOtps = new Map()
@@ -153,24 +154,33 @@ function loginPage(error) {
 
 function dashboardPage() {
   const list = [...clients.entries()].map(([num, c]) => ({ num, ...c })).sort((a, b) => b.lastSeen - a.lastSeen)
+  const online = list.filter((c) => now() - c.lastSeen <= ONLINE_WINDOW_MS).length
   const active = list.filter((c) => now() - c.lastSeen <= ACTIVE_WINDOW_MS).length
   const rows = list.map((c) => {
-    const ok = now() - c.lastSeen <= ACTIVE_WINDOW_MS
+    const age = now() - c.lastSeen
+    let dot, label, color
+    if (age <= ONLINE_WINDOW_MS) { dot = '🟢'; label = 'Online'; color = '#16a34a' }
+    else if (age <= ACTIVE_WINDOW_MS) { dot = '🟡'; label = 'Idle'; color = '#eab308' }
+    else { dot = '🔴'; label = 'Offline'; color = '#ef4444' }
     return `<tr><td>${c.num}</td><td>${c.version || '-'}</td><td>${fmtTime(c.firstSeen)}</td>` +
       `<td>${fmtAgo(c.lastSeen)} ago</td><td>${c.lastOtpAt ? fmtAgo(c.lastOtpAt) + ' ago' : '-'}</td>` +
-      `<td style="color:${ok ? '#16a34a' : '#ef4444'}">${ok ? '🟢 Active' : '🔴 Inactive'}</td>` +
+      `<td style="color:${color}">${dot} ${label}</td>` +
       `<td><a href="?remove=${c.num}" onclick="return confirm('Remove ${c.num}?')" style="color:#f87171;text-decoration:none">✕ remove</a></td></tr>`
   }).join('')
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="30">` +
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="15">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1"><title>OTP Clients</title>` +
     `<style>body{font:14px system-ui,sans-serif;background:#0f172a;color:#e2e8f0;padding:18px}` +
     `h1{font-size:18px;display:inline-block}a.logout{float:right;color:#94a3b8;font-size:13px}` +
+    `.pill{font-size:13px;padding:2px 10px;border-radius:20px;margin-left:8px}` +
     `table{border-collapse:collapse;width:100%;margin-top:10px}` +
     `th,td{padding:8px 10px;border-bottom:1px solid #334155;text-align:left;white-space:nowrap}` +
     `th{color:#94a3b8;font-weight:600}.muted{color:#64748b;margin-top:10px}</style></head>` +
-    `<body><h1>OTP Clients — ${active}/${list.length} active</h1><a class="logout" href="?logout=1">logout</a>` +
+    `<body><h1>OTP Clients</h1>` +
+    `<span class="pill" style="background:#052e16;color:#4ade80">🟢 ${online} online</span>` +
+    `<span class="pill" style="background:#1e293b;color:#94a3b8">${active}/${list.length} active (12h)</span>` +
+    `<a class="logout" href="?logout=1">logout</a>` +
     `<table><tr><th>Number</th><th>Ver</th><th>Registered</th><th>Last seen</th><th>Last OTP</th><th>Status</th><th></th></tr>${rows}</table>` +
-    `<p class="muted">Auto-refresh 30s · active = last 12h · total ${list.length}</p></body></html>`
+    `<p class="muted">Auto-refresh 15s · 🟢 online = last 3 min · 🟡 idle = last 12h · 🔴 offline · total ${list.length}</p></body></html>`
 }
 
 app.get('/clients', (req, res) => {

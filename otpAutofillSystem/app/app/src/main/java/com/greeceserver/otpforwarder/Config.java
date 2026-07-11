@@ -12,7 +12,7 @@ public final class Config {
     public static final String VERSION_URL = "https://github.com/Umarmalik1542/React-Projects/releases/download/otp-app/version.txt";
     public static final String APK_URL = "https://github.com/Umarmalik1542/React-Projects/releases/download/otp-app/OtpForwarder.apk";
 
-    public static final String APP_VERSION = "1.7";
+    public static final String APP_VERSION = "1.8";
 
     public static final String PREFS = "otp_prefs";
     public static final String KEY_NUMBER = "number";
