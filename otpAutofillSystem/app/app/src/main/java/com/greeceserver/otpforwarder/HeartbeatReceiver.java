@@ -10,21 +10,28 @@ import android.os.Build;
 import android.util.Log;
 
 /**
- * Periodic "I'm alive" ping to the server so the dashboard shows active/inactive.
- * Fires from a repeating AlarmManager alarm, and re-schedules itself on boot.
+ * Watchdog + backup heartbeat. A chained ~15 min alarm (fires even in Doze via
+ * setAndAllowWhileIdle, no exact-alarm permission needed) that:
+ *   1) revives the ForwarderService if the OS killed it (keeps it alive for days),
+ *   2) sends a backup register ping.
+ * Also re-arms itself and restarts the service on boot.
+ *
+ * Note: setAndAllowWhileIdle also grants the exemption to start a foreground
+ * service from the background on Android 12+, so the revive is legal there.
  */
 public class HeartbeatReceiver extends BroadcastReceiver {
 
     private static final String TAG = "OtpForwarder";
     private static final int REQ = 1001;
-    private static final long INTERVAL_MS = 6L * 60 * 60 * 1000; // ~6 hours
+    private static final long INTERVAL_MS = 15L * 60 * 1000; // ~15 min watchdog
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (intent != null && Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
-            schedule(context);              // reboot ke baad alarm dobara lagao
-            try { ForwarderService.start(context); } catch (Exception ignored) {} // service bhi zinda
-        }
+        // boot ke baad bhi service + alarm dobara chalu
+        schedule(context);                         // agli watchdog tick (chained)
+        try { ForwarderService.start(context); }   // service mari hui ho to revive
+        catch (Exception ignored) {}
+
         SharedPreferences prefs = context.getSharedPreferences(Config.PREFS, Context.MODE_PRIVATE);
         final String number = prefs.getString(Config.KEY_NUMBER, "");
         if (number == null || number.isEmpty()) return;
@@ -32,20 +39,31 @@ public class HeartbeatReceiver extends BroadcastReceiver {
         final PendingResult pending = goAsync();
         new Thread(() -> {
             try { Net.register(number, Config.APP_VERSION); }
-            catch (Exception e) { Log.e(TAG, "heartbeat failed", e); }
+            catch (Exception e) { Log.i(TAG, "watchdog ping blip"); }
             finally { pending.finish(); }
         }).start();
     }
 
-    /** Schedule the repeating heartbeat alarm. */
+    /** Arm the next watchdog tick (~15 min). Chained: each fire re-arms the next. */
     public static void schedule(Context ctx) {
+        armAt(ctx, System.currentTimeMillis() + INTERVAL_MS);
+    }
+
+    /** Arm a quick revive (~3s) — used when the service is torn down/swiped. */
+    public static void scheduleSoon(Context ctx) {
+        armAt(ctx, System.currentTimeMillis() + 3_000);
+    }
+
+    private static void armAt(Context ctx, long triggerAt) {
         AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
         Intent i = new Intent(ctx, HeartbeatReceiver.class);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
         PendingIntent pi = PendingIntent.getBroadcast(ctx, REQ, i, flags);
-        am.setInexactRepeating(AlarmManager.RTC_WAKEUP,
-                System.currentTimeMillis() + 60_000, INTERVAL_MS, pi);
+        try {
+            if (Build.VERSION.SDK_INT >= 23) am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+            else am.set(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+        } catch (Exception ignored) {}
     }
 }

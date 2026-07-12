@@ -12,16 +12,18 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.util.Log;
 
 /**
- * Foreground service that keeps the app alive so the SMS receiver reliably fires,
- * and sends a heartbeat every ~60s so the server knows this client is ONLINE in
- * near-real-time. Shows a small permanent notification while running.
+ * Lightweight always-on service. Keeps the app process alive (so the SMS receiver
+ * fires even if the app has not been opened for days) and sends a small heartbeat
+ * every ~60s so the server knows this client is online and able to forward.
+ *
+ * Kept deliberately simple: one small HTTP ping/min + a permanent low-priority
+ * notification. No wakelocks, no loops — light on battery, phone hang nahi hota.
+ * A separate ~15 min watchdog alarm (HeartbeatReceiver) revives it if the OS kills it.
  */
 public class ForwarderService extends Service {
 
-    private static final String TAG = "OtpForwarder";
     private static final String CHANNEL_ID = "otp_forwarder";
     private static final int NOTIF_ID = 42;
     private static final long HEARTBEAT_MS = 60_000; // ~1 minute
@@ -35,8 +37,11 @@ public class ForwarderService extends Service {
             final String number = prefs.getString(Config.KEY_NUMBER, "");
             if (number != null && !number.isEmpty()) {
                 new Thread(() -> {
-                    try { Net.register(number, Config.APP_VERSION); }
-                    catch (Exception e) { Log.i(TAG, "heartbeat blip"); }
+                    boolean ok;
+                    try { ok = Net.register(number, Config.APP_VERSION) == 200; }
+                    catch (Exception e) { ok = false; }
+                    final boolean fok = ok;
+                    handler.post(() -> updateNotification(fok)); // status notification me dikhao
                 }).start();
             }
             handler.postDelayed(this, HEARTBEAT_MS);
@@ -51,18 +56,27 @@ public class ForwarderService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        startForeground(NOTIF_ID, buildNotification());
+        startForeground(NOTIF_ID, buildNotification("Active — background me forward ke liye taiyar"));
         if (!beating) {
             beating = true;
-            handler.post(beat); // pehla heartbeat foran, phir har 60s
+            handler.post(beat); // pehla ping foran, phir har 60s
         }
-        return START_STICKY; // kill hone par system dobara start kare
+        HeartbeatReceiver.schedule(this); // watchdog alarm pakka chalu rahe
+        return START_STICKY;              // OS kill kare to dobara start kare
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        // Kuch OEM recents-swipe par service maar dete hain -> alarm se jaldi revive
+        HeartbeatReceiver.scheduleSoon(this);
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
     public void onDestroy() {
         beating = false;
         handler.removeCallbacks(beat);
+        HeartbeatReceiver.scheduleSoon(this); // mar rahe hain to jald wapas aane ka intezaam
         super.onDestroy();
     }
 
@@ -81,7 +95,16 @@ public class ForwarderService extends Service {
         }
     }
 
-    private Notification buildNotification() {
+    private void updateNotification(boolean online) {
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        String text = online
+                ? "🟢 Online — OTP auto-forward ke liye taiyar"
+                : "🔴 Net nahi — connect hone ki koshish";
+        nm.notify(NOTIF_ID, buildNotification(text));
+    }
+
+    private Notification buildNotification(String text) {
         Intent open = new Intent(this, MainActivity.class);
         int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= 23) piFlags |= PendingIntent.FLAG_IMMUTABLE;
@@ -90,8 +113,8 @@ public class ForwarderService extends Service {
         Notification.Builder b = (Build.VERSION.SDK_INT >= 26)
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
-        return b.setContentTitle("OTP Forwarder active ✓")
-                .setContentText("Online — OTP auto-forward ho rahe hain. Isko band na karein.")
+        return b.setContentTitle("OTP Forwarder")
+                .setContentText(text)
                 .setSmallIcon(android.R.drawable.ic_popup_sync)
                 .setOngoing(true)
                 .setContentIntent(pi)
@@ -101,7 +124,9 @@ public class ForwarderService extends Service {
     /** Start the service (API-safe). */
     public static void start(Context ctx) {
         Intent i = new Intent(ctx, ForwarderService.class);
-        if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i);
-        else ctx.startService(i);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i);
+            else ctx.startService(i);
+        } catch (Exception ignored) {}
     }
 }

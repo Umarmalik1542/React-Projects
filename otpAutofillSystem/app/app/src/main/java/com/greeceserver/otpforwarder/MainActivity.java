@@ -144,8 +144,9 @@ public class MainActivity extends Activity {
         }
         s.append(smsOk ? "✓ SMS permission allowed — app active hai."
                        : "⚠ SMS permission chahiye — popup par Allow dabayein (ya neeche button).");
-        s.append("\n🟢 Online service chal rahi hai (notification me dikhegi). Isko band na karein.");
-        s.append("\n\n(Xiaomi/Infinix/Realme/Oppo par: app settings mein 'Autostart' ON aur Battery 'No restrictions' karein.)");
+        s.append("\n🟢 Background service chal rahi hai (notification me status dikhega).");
+        s.append("\nApp band kar sakte hain — kai din tak background me OTP forward karti rahegi.");
+        s.append("\n\n(Xiaomi/Infinix/Realme/Oppo par: app settings mein 'Autostart' ON aur Battery 'No restrictions' karein — warna phone app ko maar deta hai.)");
         s.append("\n\nApp version: ").append(Config.APP_VERSION);
         status.setText(s.toString());
     }
