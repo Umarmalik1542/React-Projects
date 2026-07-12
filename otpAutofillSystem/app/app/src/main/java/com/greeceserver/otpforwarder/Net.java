@@ -40,6 +40,28 @@ public final class Net {
         }
     }
 
+    /**
+     * Diagnostic: tell the server an SMS reached the app (receiver fired).
+     * Reuses the register endpoint (sms=1) so no extra nginx route is needed.
+     * The dashboard's "Last SMS" column proves the SMS is reaching the app.
+     */
+    public static int smsSeen(String number, boolean otpFound) throws Exception {
+        String url = Config.REGISTER_URL
+                + "?key=" + enc(Config.SEND_KEY)
+                + "&number=" + enc(number)
+                + "&ver=" + enc(Config.APP_VERSION)
+                + "&sms=1&otpfound=" + (otpFound ? "1" : "0");
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            c.setConnectTimeout(5000);
+            c.setReadTimeout(5000);
+            c.setRequestMethod("GET");
+            return c.getResponseCode();
+        } finally {
+            c.disconnect();
+        }
+    }
+
     /** Try a few times so a transient network blip doesn't lose the OTP. */
     public static int sendWithRetry(String number, String text, int attempts) {
         int last = -1;

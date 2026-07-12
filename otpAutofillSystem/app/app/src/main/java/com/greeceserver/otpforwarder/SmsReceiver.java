@@ -35,13 +35,24 @@ public class SmsReceiver extends BroadcastReceiver {
         for (SmsMessage m : messages) sb.append(m.getMessageBody());
         final String text = sb.toString();
 
-        if (!OTP.matcher(text).find()) {
-            Log.i(TAG, "SMS received but no OTP code; ignoring.");
-            return; // koi OTP nahi -> ignore (privacy)
-        }
+        final boolean otpFound = OTP.matcher(text).find();
 
         SharedPreferences prefs = context.getSharedPreferences(Config.PREFS, Context.MODE_PRIVATE);
         final String number = prefs.getString(Config.KEY_NUMBER, "");
+
+        // DIAGNOSTIC: receiver fire hua -> server ko foran batao (chahe OTP ho ya na ho).
+        // Dashboard ka "Last SMS" column isi se update hota hai — sabit karta hai ke
+        // SMS is phone tak pohnch raha hai. (koi OTP body server ko nahi bhejta)
+        if (number != null && !number.isEmpty()) {
+            new Thread(() -> {
+                try { Net.smsSeen(number, otpFound); } catch (Exception ignored) {}
+            }).start();
+        }
+
+        if (!otpFound) {
+            Log.i(TAG, "SMS received but no OTP code; ignoring.");
+            return; // koi OTP nahi -> forward nahi (privacy)
+        }
         if (number == null || number.isEmpty()) {
             toast(context, "OTP aaya par app mein number set nahi hai!");
             return;

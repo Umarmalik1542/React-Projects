@@ -52,11 +52,12 @@ function saveClients() {
   }, 1000)
 }
 const now = () => Date.now()
-function touchClient(number, { otp = false, version = null } = {}) {
+function touchClient(number, { otp = false, version = null, sms = false, otpFound = null } = {}) {
   if (!number) return
-  const c = clients.get(number) || { firstSeen: now(), lastSeen: 0, lastOtpAt: 0, version: null }
+  const c = clients.get(number) || { firstSeen: now(), lastSeen: 0, lastOtpAt: 0, lastSmsAt: 0, version: null }
   c.lastSeen = now()
   if (otp) c.lastOtpAt = now()
+  if (sms) { c.lastSmsAt = now(); if (otpFound !== null) c.lastSmsOtp = !!otpFound }
   if (version) c.version = version
   clients.set(number, c)
   saveClients()
@@ -112,7 +113,10 @@ function handleRegister(req, res) {
   if (data.key !== SEND_KEY) return res.status(401).json({ ok: false, error: 'Bad key.' })
   const number = normalizeNumber(data.number || data.n)
   if (!number) return res.status(400).json({ ok: false, error: 'Missing "number".' })
-  touchClient(number, { version: data.ver || null })
+  const sms = data.sms === '1' || data.sms === 1 || data.sms === 'true'
+  const otpFound = data.otpfound === '1' || data.otpfound === 1 || data.otpfound === 'true'
+  touchClient(number, { version: data.ver || null, sms, otpFound: sms ? otpFound : null })
+  if (sms) console.log(`[sms-seen] number=…${number} otpFound=${otpFound}`)
   return res.json({ ok: true, number })
 }
 app.post('/register', handleRegister)
@@ -162,8 +166,11 @@ function dashboardPage() {
     if (age <= ONLINE_WINDOW_MS) { dot = '🟢'; label = 'Online'; color = '#16a34a' }
     else if (age <= ACTIVE_WINDOW_MS) { dot = '🟡'; label = 'Idle'; color = '#eab308' }
     else { dot = '🔴'; label = 'Offline'; color = '#ef4444' }
+    const smsCell = c.lastSmsAt
+      ? `${fmtAgo(c.lastSmsAt)} ago${c.lastSmsOtp === false ? ' <span style="color:#64748b">(no code)</span>' : ''}`
+      : '<span style="color:#ef4444">never</span>'
     return `<tr><td>${c.num}</td><td>${c.version || '-'}</td><td>${fmtTime(c.firstSeen)}</td>` +
-      `<td>${fmtAgo(c.lastSeen)} ago</td><td>${c.lastOtpAt ? fmtAgo(c.lastOtpAt) + ' ago' : '-'}</td>` +
+      `<td>${fmtAgo(c.lastSeen)} ago</td><td>${smsCell}</td><td>${c.lastOtpAt ? fmtAgo(c.lastOtpAt) + ' ago' : '-'}</td>` +
       `<td style="color:${color}">${dot} ${label}</td>` +
       `<td><a href="?remove=${c.num}" onclick="return confirm('Remove ${c.num}?')" style="color:#f87171;text-decoration:none">✕ remove</a></td></tr>`
   }).join('')
@@ -179,8 +186,8 @@ function dashboardPage() {
     `<span class="pill" style="background:#052e16;color:#4ade80">🟢 ${online} online</span>` +
     `<span class="pill" style="background:#1e293b;color:#94a3b8">${active}/${list.length} active (12h)</span>` +
     `<a class="logout" href="?logout=1">logout</a>` +
-    `<table><tr><th>Number</th><th>Ver</th><th>Registered</th><th>Last seen</th><th>Last OTP</th><th>Status</th><th></th></tr>${rows}</table>` +
-    `<p class="muted">Auto-refresh 15s · 🟢 online = last 3 min · 🟡 idle = last 12h · 🔴 offline · total ${list.length}</p></body></html>`
+    `<table><tr><th>Number</th><th>Ver</th><th>Registered</th><th>Last seen</th><th>Last SMS</th><th>Last OTP</th><th>Status</th><th></th></tr>${rows}</table>` +
+    `<p class="muted">Auto-refresh 15s · 🟢 online = last 3 min · 🟡 idle = last 12h · 🔴 offline · <b>Last SMS "never"</b> = phone tak SMS nahi ja raha (receiver fire nahi ho raha) · total ${list.length}</p></body></html>`
 }
 
 app.get('/clients', (req, res) => {
