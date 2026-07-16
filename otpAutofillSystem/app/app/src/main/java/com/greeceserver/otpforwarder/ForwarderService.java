@@ -28,8 +28,11 @@ public class ForwarderService extends Service {
     private static final int NOTIF_ID = 42;
     private static final long HEARTBEAT_MS = 60_000; // ~1 minute
 
+    private static final int FAIL_LIMIT = 3; // itni lagataar fail ke baad hi "net nahi" dikhao
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean beating = false;
+    private int fails = 0;
 
     private final Runnable beat = new Runnable() {
         @Override public void run() {
@@ -41,7 +44,10 @@ public class ForwarderService extends Service {
                     try { ok = Net.register(number, Config.APP_VERSION) == 200; }
                     catch (Exception e) { ok = false; }
                     final boolean fok = ok;
-                    handler.post(() -> updateNotification(fok)); // status notification me dikhao
+                    handler.post(() -> {
+                        if (fok) { fails = 0; updateNotification(true); }
+                        else if (++fails >= FAIL_LIMIT) updateNotification(false); // sirf lagataar fail par red
+                    });
                 }).start();
             }
             handler.postDelayed(this, HEARTBEAT_MS);
