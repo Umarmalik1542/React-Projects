@@ -36,19 +36,22 @@ public class ForwarderService extends Service {
 
     private final Runnable beat = new Runnable() {
         @Override public void run() {
+            final Context ctx = ForwarderService.this;
             SharedPreferences prefs = getSharedPreferences(Config.PREFS, MODE_PRIVATE);
             final String number = prefs.getString(Config.KEY_NUMBER, "");
             if (number != null && !number.isEmpty()) {
                 new Thread(() -> {
                     boolean ok;
-                    try { ok = Net.register(number, Config.APP_VERSION) == 200; }
+                    try { ok = Net.register(ctx, number) == 200; }
                     catch (Exception e) { ok = false; }
                     final boolean fok = ok;
                     handler.post(() -> {
-                        if (fok) { fails = 0; updateNotification(true); }
-                        else if (++fails >= FAIL_LIMIT) updateNotification(false); // sirf lagataar fail par red
+                        if (fok) fails = 0; else fails++;
+                        updateNotification(fok || fails < FAIL_LIMIT);
                     });
                 }).start();
+            } else {
+                updateNotification(false); // number nahi -> not ready
             }
             handler.postDelayed(this, HEARTBEAT_MS);
         }
@@ -101,12 +104,20 @@ public class ForwarderService extends Service {
         }
     }
 
-    private void updateNotification(boolean online) {
+    /**
+     * Notification reflects the REAL state, in priority order:
+     * missing setting -> not connected -> online. Client ko yahi ek cheez dikhti hai.
+     * @param connected whether the last heartbeat reached the server (with debounce)
+     */
+    private void updateNotification(boolean connected) {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm == null) return;
-        String text = online
-                ? "🟢 Online — OTP auto-forward ke liye taiyar"
-                : "🔴 Net nahi — connect hone ki koshish";
+        String text;
+        if (!Readiness.number(this))      text = "⚠ App mein apna number daalein";
+        else if (!Readiness.sms(this))    text = "⚠ SMS permission allow karein";
+        else if (!connected)              text = "🔴 Net nahi — connect hone ki koshish";
+        else if (!Readiness.battery(this))text = "🟢 Online (behtar: Battery ‘No restrictions’ karein)";
+        else                              text = "🟢 Online — OTP ke liye taiyar";
         nm.notify(NOTIF_ID, buildNotification(text));
     }
 

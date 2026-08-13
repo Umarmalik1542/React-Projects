@@ -34,6 +34,7 @@ public class MainActivity extends Activity {
         status = findViewById(R.id.status);
         Button saveBtn = findViewById(R.id.saveBtn);
         Button permBtn = findViewById(R.id.permBtn);
+        Button battBtn = findViewById(R.id.battBtn);
         Button updateBtn = findViewById(R.id.updateBtn);
 
         final SharedPreferences prefs = getSharedPreferences(Config.PREFS, MODE_PRIVATE);
@@ -67,6 +68,8 @@ public class MainActivity extends Activity {
             }
         });
 
+        battBtn.setOnClickListener(v -> askBattery());
+
         updateBtn.setOnClickListener(v -> Updater.checkAsync(this, true));
 
         // App khulte hi permission popup + register + heartbeat + service + update check
@@ -90,9 +93,26 @@ public class MainActivity extends Activity {
 
     private void registerNow(String number) {
         new Thread(() -> {
-            try { Net.register(number, Config.APP_VERSION); }
+            try { Net.register(this, number); }
             catch (Exception ignored) {}
         }).start();
+    }
+
+    /** One-tap: ask the OS to exempt this app from battery optimization. */
+    private void askBattery() {
+        if (Readiness.battery(this)) {
+            Toast.makeText(this, "Battery already unrestricted ✓", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            i.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(i);
+        } catch (Exception e) {
+            // kuch phones ye direct intent block karte hain -> general list kholo
+            try { startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)); }
+            catch (Exception ignored) {}
+        }
     }
 
     @Override
@@ -132,22 +152,26 @@ public class MainActivity extends Activity {
     }
 
     private void updateStatus() {
-        SharedPreferences prefs = getSharedPreferences(Config.PREFS, MODE_PRIVATE);
-        String num = prefs.getString(Config.KEY_NUMBER, "");
-        boolean smsOk = smsGranted();
+        boolean numOk = Readiness.number(this);
+        boolean smsOk = Readiness.sms(this);
+        boolean notifOk = Readiness.notif(this);
+        boolean battOk = Readiness.battery(this);
 
         StringBuilder s = new StringBuilder();
-        if (num.isEmpty()) {
-            s.append("Apna mobile number daal kar Save dabayein.\n");
+        s.append(numOk   ? "✓ Number set\n"                 : "✗ Number set karein (upar Save)\n");
+        s.append(smsOk   ? "✓ SMS permission\n"             : "✗ SMS permission (button dabayein)\n");
+        s.append(notifOk ? "✓ Notification\n"               : "✗ Notification allow karein\n");
+        s.append(battOk  ? "✓ Battery: No restrictions\n"   : "✗ Battery restriction OFF karein (button)\n");
+
+        s.append("\n");
+        if (numOk && smsOk) {
+            s.append("✅ READY — app taiyar hai. Aap app band kar sakte hain,\nkai din tak background me OTP forward hoti rahegi.");
+            if (!battOk) s.append("\n(Behtar reliability ke liye Battery button bhi daba dein.)");
         } else {
-            s.append("Number: ").append(num).append("\n");
+            s.append("⚠ Upar ✗ wali cheezein poori karein — tab app ONLINE hogi.");
         }
-        s.append(smsOk ? "✓ SMS permission allowed — app active hai."
-                       : "⚠ SMS permission chahiye — popup par Allow dabayein (ya neeche button).");
-        s.append("\n🟢 Background service chal rahi hai (notification me status dikhega).");
-        s.append("\nApp band kar sakte hain — kai din tak background me OTP forward karti rahegi.");
-        s.append("\n\n(Xiaomi/Infinix/Realme/Oppo par: app settings mein 'Autostart' ON aur Battery 'No restrictions' karein — warna phone app ko maar deta hai.)");
-        s.append("\n\nApp version: ").append(Config.APP_VERSION);
+        s.append("\n\n(Xiaomi/Infinix/Realme/Oppo par: 'Autostart' bhi ON karein.)");
+        s.append("\nApp version: ").append(Config.APP_VERSION);
         status.setText(s.toString());
     }
 }

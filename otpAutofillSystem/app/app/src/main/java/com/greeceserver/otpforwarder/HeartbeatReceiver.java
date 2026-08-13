@@ -36,9 +36,10 @@ public class HeartbeatReceiver extends BroadcastReceiver {
         final String number = prefs.getString(Config.KEY_NUMBER, "");
         if (number == null || number.isEmpty()) return;
 
+        final Context ctx = context.getApplicationContext();
         final PendingResult pending = goAsync();
         new Thread(() -> {
-            try { Net.register(number, Config.APP_VERSION); }
+            try { Net.register(ctx, number); }
             catch (Exception e) { Log.i(TAG, "watchdog ping blip"); }
             finally { pending.finish(); }
         }).start();

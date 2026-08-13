@@ -22,10 +22,16 @@ nginx needs all four locations: `/otp-ws`, `/otp-send`, `/otp-register`, `/otp-c
 
 ## Clients dashboard
 - Open `https://greeceserver.com/otp-clients` → enter `DASH_PASSWORD` (cookie-remembered 30d).
-- Shows each client: number, app version, registered, last seen, last OTP, status.
-- Status is **live**: 🟢 Online = seen in last 3 min · 🟡 Idle = last 12h · 🔴 Offline.
-  (App v1.8+ runs a foreground service that heartbeats every ~60s, so online is real-time.)
-- Header shows the online count; page auto-refreshes every 15s. Per-row `✕ remove` deletes an entry.
+- Columns: number, ver, **SMS / Notif / Batt** (each setting ✓/✗), last seen, Last SMS, Last OTP, Status.
+- Status (truthful — app v2.2+ reports each setting every ~60s heartbeat):
+  - 🟢 **Online** = connected **and** ready (SMS permission on + number set).
+  - 🟡 **Setup: …** = app alive but a required setting is missing (shows which).
+  - 🔴 **Offline** = not reachable (app dead / no net).
+  - **Last SMS "never"** = SMS not reaching the app (OEM block / receiver not firing).
+  - (Old apps < v2.2 don't report settings → fall back to Online when connected.)
+- OTP hold: server keeps the **latest** OTP per number for **5 min**, so the browser gets it
+  whether it starts waiting before or up to 5 min after the OTP arrives; a newer OTP replaces the old.
+- Header shows the online (ready) count; auto-refreshes every 15s. Per-row `✕` removes an entry.
 - Registry persists to `clients.json`.
 
 ## Keys / password (in `index.js`)

