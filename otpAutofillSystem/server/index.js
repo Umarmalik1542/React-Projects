@@ -62,10 +62,11 @@ function touchClient(number, { otp = false, version = null, smsSeen = false, otp
   if (smsSeen) { c.lastSmsAt = now(); if (otpFound !== null) c.lastSmsOtp = !!otpFound }
   if (version) c.version = version
   if (flags) {
-    if (flags.sms   !== undefined) c.sms   = flags.sms   // SMS permission on?
-    if (flags.notif !== undefined) c.notif = flags.notif // notifications on?
-    if (flags.batt  !== undefined) c.batt  = flags.batt  // battery unrestricted?
-    if (flags.num   !== undefined) c.num   = flags.num   // number set?
+    if (flags.sms   !== undefined) c.sms    = flags.sms   // SMS permission on?
+    if (flags.notif !== undefined) c.notif  = flags.notif // notifications on?
+    if (flags.batt  !== undefined) c.batt   = flags.batt  // battery unrestricted?
+    if (flags.num   !== undefined) c.numSet = flags.num   // number set? (NOT 'num' — collides with phone-number key)
+    delete c.num                                          // purani buggy value saaf karo
   }
   clients.set(number, c)
   saveClients()
@@ -178,7 +179,7 @@ const tick = (v) => v === undefined ? '<span style="color:#64748b">–</span>'
   : (v ? '<span style="color:#16a34a">✓</span>' : '<span style="color:#ef4444">✗</span>')
 
 function dashboardPage() {
-  const list = [...clients.entries()].map(([num, c]) => ({ num, ...c })).sort((a, b) => b.lastSeen - a.lastSeen)
+  const list = [...clients.entries()].map(([num, c]) => ({ ...c, num })).sort((a, b) => b.lastSeen - a.lastSeen)
   const reports = (c) => c.sms !== undefined            // naya app readiness bhejta hai
   const isReady = (c) => reports(c) ? c.sms === true : true // purane app: fall back to online
   const isConnected = (c) => now() - c.lastSeen <= ONLINE_WINDOW_MS
@@ -192,7 +193,7 @@ function dashboardPage() {
     } else if (connected) {
       // app zinda hai par ready nahi -> kaunsi setting missing?
       const miss = []
-      if (c.num === false) miss.push('number')
+      if (c.numSet === false) miss.push('number')
       if (c.sms === false) miss.push('SMS')
       dot = '🟡'; label = 'Setup: ' + (miss.join(', ') || 'settings'); color = '#eab308'
     } else {
