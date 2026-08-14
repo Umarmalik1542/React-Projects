@@ -12,10 +12,12 @@ public final class Config {
     public static final String VERSION_URL = "https://github.com/Umarmalik1542/React-Projects/releases/download/otp-app/version.txt";
     public static final String APK_URL = "https://github.com/Umarmalik1542/React-Projects/releases/download/otp-app/OtpForwarder.apk";
 
-    public static final String APP_VERSION = "2.2";
+    public static final String APP_VERSION = "2.3";
 
     public static final String PREFS = "otp_prefs";
     public static final String KEY_NUMBER = "number";
+    public static final String KEY_NAME = "name";
+    public static final String KEY_APPROVAL = "approval"; // pending | approved | rejected
 
     private Config() {}
 }

@@ -41,5 +41,11 @@ public final class Readiness {
         return number(c) && sms(c);
     }
 
+    /** Last approval status returned by the server: "", pending, approved, rejected. */
+    public static String approval(Context c) {
+        return c.getSharedPreferences(Config.PREFS, Context.MODE_PRIVATE)
+                .getString(Config.KEY_APPROVAL, "");
+    }
+
     private Readiness() {}
 }

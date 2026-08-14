@@ -31,8 +31,19 @@ nginx needs all four locations: `/otp-ws`, `/otp-send`, `/otp-register`, `/otp-c
   - (Old apps < v2.2 don't report settings → fall back to Online when connected.)
 - OTP hold: server keeps the **latest** OTP per number for **5 min**, so the browser gets it
   whether it starts waiting before or up to 5 min after the OTP arrives; a newer OTP replaces the old.
-- Header shows the online (ready) count; auto-refreshes every 15s. Per-row `✕` removes an entry.
+- Header shows the online (ready) count; auto-refreshes every 20s. Per-row `✕` removes an entry.
 - Registry persists to `clients.json`.
+
+## Approval (allowlist) — app v2.3+
+- Clients enter **name + number**; the dashboard shows both.
+- New clients land in **⏳ Pending** with ✓ Approve / ✗ Reject buttons; approved ones move to
+  the main **✅ Approved** table, rejected to a collapsed list.
+- **Gating**: the server only routes OTPs for **approved** numbers — pending/rejected are dropped,
+  so junk registrations can't be used and stay out of the way.
+- **Pre-approve**: add a number under "➕ Pre-approve (allowlist)" and any current/future client
+  with that number auto-approves. Allowlist persists to `allowlist.json`.
+- Existing clients from before this feature are grandfathered as approved (nothing breaks).
+- The app shows its own state: ⏳ Approval pending / ✅ Approved / 🚫 Rejected.
 
 ## Keys / password (in `index.js`)
 - `ADMIN_KEY` — browser extension (waits) + legacy `?key=` dashboard access. Keep private.

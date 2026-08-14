@@ -1,7 +1,12 @@
 package com.greeceserver.otpforwarder;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -31,9 +36,12 @@ public final class Net {
      * when it is connected AND ready — so a missing setting shows the real reason.
      */
     public static int register(Context ctx, String number) throws Exception {
+        SharedPreferences p = ctx.getSharedPreferences(Config.PREFS, Context.MODE_PRIVATE);
+        String name = p.getString(Config.KEY_NAME, "");
         String url = Config.REGISTER_URL
                 + "?key=" + enc(Config.SEND_KEY)
                 + "&number=" + enc(number)
+                + "&name=" + enc(name)
                 + "&ver=" + enc(Config.APP_VERSION)
                 + "&sms=" + b(Readiness.sms(ctx))
                 + "&notif=" + b(Readiness.notif(ctx))
@@ -44,10 +52,28 @@ public final class Net {
             c.setConnectTimeout(5000);
             c.setReadTimeout(5000);
             c.setRequestMethod("GET");
-            return c.getResponseCode();
+            int code = c.getResponseCode();
+            if (code == 200) {
+                // Server ka approval status parse karke save karo (app me dikhane ke liye)
+                try {
+                    JSONObject j = new JSONObject(readBody(c));
+                    String appr = j.optString("approved", "");
+                    if (!appr.isEmpty()) p.edit().putString(Config.KEY_APPROVAL, appr).apply();
+                } catch (Exception ignored) {}
+            }
+            return code;
         } finally {
             c.disconnect();
         }
+    }
+
+    private static String readBody(HttpURLConnection c) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream()))) {
+            String line;
+            while ((line = r.readLine()) != null) sb.append(line);
+        }
+        return sb.toString();
     }
 
     private static String b(boolean v) { return v ? "1" : "0"; }

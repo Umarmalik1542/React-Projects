@@ -16,13 +16,21 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Apna mobile number daalein (jis par OTP aata hai), phir Save dabayein."
+        android:text="Apna naam aur mobile number daalein (jis par OTP aata hai), phir Save dabayein."
         android:paddingBottom="16dp" />
+
+    <EditText
+        android:id="@+id/nameInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Apna naam"
+        android:inputType="textPersonName" />
 
     <EditText
         android:id="@+id/numberInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:hint="03001234567"
         android:inputType="phone" />
 

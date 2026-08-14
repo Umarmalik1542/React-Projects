@@ -21,6 +21,7 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
+    private EditText nameInput;
     private EditText numberInput;
     private TextView status;
     private boolean askedOnce = false;
@@ -30,6 +31,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        nameInput = findViewById(R.id.nameInput);
         numberInput = findViewById(R.id.numberInput);
         status = findViewById(R.id.status);
         Button saveBtn = findViewById(R.id.saveBtn);
@@ -38,15 +40,21 @@ public class MainActivity extends Activity {
         Button updateBtn = findViewById(R.id.updateBtn);
 
         final SharedPreferences prefs = getSharedPreferences(Config.PREFS, MODE_PRIVATE);
+        nameInput.setText(prefs.getString(Config.KEY_NAME, ""));
         numberInput.setText(prefs.getString(Config.KEY_NUMBER, ""));
 
         saveBtn.setOnClickListener(v -> {
             String num = numberInput.getText().toString().trim();
+            String nm = nameInput.getText().toString().trim();
             if (num.isEmpty()) {
                 Toast.makeText(this, "Apna number daalein", Toast.LENGTH_SHORT).show();
                 return;
             }
-            prefs.edit().putString(Config.KEY_NUMBER, num).apply();
+            if (nm.isEmpty()) {
+                Toast.makeText(this, "Apna naam daalein", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            prefs.edit().putString(Config.KEY_NUMBER, num).putString(Config.KEY_NAME, nm).apply();
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show();
             ensurePermission();
             registerNow(num);
@@ -164,6 +172,14 @@ public class MainActivity extends Activity {
         s.append(battOk  ? "✓ Battery: No restrictions\n"   : "✗ Battery restriction OFF karein (button)\n");
 
         s.append("\n");
+        String appr = Readiness.approval(this);
+        if ("rejected".equals(appr)) {
+            s.append("🚫 Account REJECTED — admin se rabta karein.\n");
+        } else if ("pending".equals(appr)) {
+            s.append("⏳ Approval PENDING — admin ke approve karne ka intezar.\n");
+        } else if ("approved".equals(appr)) {
+            s.append("✅ APPROVED by admin.\n");
+        }
         if (numOk && smsOk) {
             s.append("✅ READY — app taiyar hai. Aap app band kar sakte hain,\nkai din tak background me OTP forward hoti rahegi.");
             if (!battOk) s.append("\n(Behtar reliability ke liye Battery button bhi daba dein.)");

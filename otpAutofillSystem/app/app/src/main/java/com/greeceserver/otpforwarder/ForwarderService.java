@@ -112,12 +112,15 @@ public class ForwarderService extends Service {
     private void updateNotification(boolean connected) {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm == null) return;
+        String appr = Readiness.approval(this);
         String text;
-        if (!Readiness.number(this))      text = "⚠ App mein apna number daalein";
-        else if (!Readiness.sms(this))    text = "⚠ SMS permission allow karein";
-        else if (!connected)              text = "🔴 Net nahi — connect hone ki koshish";
-        else if (!Readiness.battery(this))text = "🟢 Online (behtar: Battery ‘No restrictions’ karein)";
-        else                              text = "🟢 Online — OTP ke liye taiyar";
+        if (!Readiness.number(this))       text = "⚠ App mein apna naam/number daalein";
+        else if (!Readiness.sms(this))     text = "⚠ SMS permission allow karein";
+        else if ("rejected".equals(appr))  text = "🚫 Account rejected — admin se rabta karein";
+        else if (!connected)               text = "🔴 Net nahi — connect hone ki koshish";
+        else if ("pending".equals(appr))   text = "⏳ Approval pending — admin ke approve ka intezar";
+        else if (!Readiness.battery(this)) text = "🟢 Online (behtar: Battery ‘No restrictions’ karein)";
+        else                               text = "🟢 Online — OTP ke liye taiyar";
         nm.notify(NOTIF_ID, buildNotification(text));
     }
 
