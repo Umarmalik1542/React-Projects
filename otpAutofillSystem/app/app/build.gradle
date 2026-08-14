@@ -1,0 +1,40 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.greeceserver.otpforwarder'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.greeceserver.otpforwarder'
+        minSdk 21
+        targetSdk 34
+        versionCode 14
+        versionName '2.3'
+    }
+
+    signingConfigs {
+        stable {
+            storeFile file('otp-release.keystore')
+            storePassword 'otpforward'
+            keyAlias 'otpkey'
+            keyPassword 'otpforward'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.stable
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+}
