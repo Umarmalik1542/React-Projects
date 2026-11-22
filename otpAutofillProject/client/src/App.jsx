@@ -156,8 +156,8 @@ export default function App() {
 
           <h1 className="text-2xl font-semibold mb-1">Enter OTP</h1>
           <p className="text-slate-400 text-sm mb-6">
-            Code aapke phone par aate hi yahan{' '}
-            <span className="text-emerald-400 font-medium">automatically</span> bhar jayega.
+            As soon as the code arrives on your phone, it fills in here{' '}
+            <span className="text-emerald-400 font-medium">automatically</span>.
           </p>
 
           {/* OTP boxes */}
@@ -210,7 +210,7 @@ export default function App() {
           <div className="border-t border-slate-800 pt-5 space-y-4">
             <div>
               <label className="text-xs uppercase tracking-wide text-slate-500">
-                Pairing code (phone par yahi bhejna hai)
+                Pairing code (paste this in the phone forwarder)
               </label>
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-2xl font-mono font-bold tracking-widest text-indigo-300">
@@ -252,9 +252,9 @@ export default function App() {
                   copy URL
                 </button>
                 <p className="text-xs text-slate-500 mt-2">
-                  Apne Android SMS-forwarder app mein is URL ko paste karein.
-                  <code className="text-slate-400"> {'{message}'}</code> ko app
-                  khud SMS text se replace kar dega.
+                  Paste this URL in your Android SMS-forwarder app. It replaces
+                  <code className="text-slate-400"> {'{message}'}</code> with the SMS text
+                  automatically.
                 </p>
               </div>
             </details>
