@@ -14,25 +14,63 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
+      # NOTE: android-actions/setup-android@v3 kept failing on the new
+      # Node24-forced runner image (3/3 attempts, same step), so it is gone.
+      # GitHub ubuntu runners ship an Android SDK at $ANDROID_HOME already.
+      - name: Prepare Android SDK (image SDK first, shell-only, no third-party action)
         run: |
-          yes | sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
+          set -x
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDK="$ANDROID_HOME"
+          SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.7'
+          # Plan B only if cmdline-tools are missing: fetch official CLI tools zip
+          if [ ! -x "$SM" ]; then
+            echo "::notice::cmdline-tools missing on image, downloading..."
+            mkdir -p "$SDK/cmdline-tools"
+            ok=""
+            curl --retry 3 --retry-delay 5 -fsSL -o /tmp/clt.zip \
+              https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip && ok=1
+            if [ -z "$ok" ]; then
+              echo "::error::cmdline-tools download failed"
+              du -sh "$SDK" || true; ls "$SDK" || true
+              exit 1
+            fi
+            unzip -q /tmp/clt.zip -d "$SDK/cmdline-tools/.tmp"
+            rm -rf "$SDK/cmdline-tools/latest"
+            mv "$SDK/cmdline-tools/.tmp/cmdline-tools" "$SDK/cmdline-tools/latest"
+          fi
+
+          # Licenses + exact packages the project needs (idempotent)
+          yes | "$SM" --licenses > /dev/null 2>&1 || true
+          yes | "$SM" --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
+
+          # Hard sanity gates: fail loudly here instead of confusingly inside gradle
+          ls "$SDK/platforms" || true
+          ls "$SDK/build-tools" || true
+          test -d "$SDK/platforms/android-34" || { echo "::error::platforms;android-34 MISSING"; exit 1; }
+          test -d "$SDK/build-tools/34.0.0" || { echo "::error::build-tools;34.0.0 MISSING"; exit 1; }
+
+      # NOTE: gradle/actions/setup-gradle@v3 replaced with a plain download so no
+      # old Node-action sits between us and the build.
+      - name: Install Gradle 8.7 (manual)
+        run: |
+          cd "$RUNNER_TEMP"
+          curl --retry 3 --retry-delay 5 -fsSL -o gradle.zip \
+            https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          unzip -q gradle.zip
+          echo "GRADLE_HOME=$(pwd)/gradle-8.7" >> "$GITHUB_ENV"
+          echo "$(pwd)/gradle-8.7/bin" >> "$GITHUB_PATH"
+          ./gradle-8.7/bin/gradle --version
 
       - name: Build release APK (signed with stable key)
         working-directory: otpAutofillSystem/app
@@ -44,13 +82,7 @@ jobs:
       - name: Write version.txt (latest versionCode)
         run: grep -oE 'versionCode[[:space:]]+[0-9]+' otpAutofillSystem/app/app/build.gradle | grep -oE '[0-9]+' > version.txt
 
-      - name: Upload APK (artifact)
-        uses: actions/upload-artifact@v4
-        with:
-          name: OtpForwarder-apk
-          path: OtpForwarder.apk
-          if-no-files-found: error
-
+      # Publish FIRST: the public Release is the critical deliverable.
       - name: Publish APK to Release (public download link)
         uses: softprops/action-gh-release@v2
         with:
@@ -60,3 +92,12 @@ jobs:
           files: |
             OtpForwarder.apk
             version.txt
+
+      # Cosmetic/debug convenience only — can never block the Release anymore.
+      - name: Upload APK (artifact, best-effort)
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: OtpForwarder-apk
+          path: OtpForwarder.apk
+          if-no-files-found: ignore
