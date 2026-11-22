@@ -65,9 +65,9 @@ public final class Updater {
     private static void promptUpdate(final Activity act) {
         new AlertDialog.Builder(act)
                 .setTitle("Update available")
-                .setMessage("Naya version available hai. Abhi update karein?")
+                .setMessage("A new version is available. Update now?")
                 .setPositiveButton("Update", (d, w) -> startDownload(act))
-                .setNegativeButton("Baad mein", null)
+                .setNegativeButton("Later", null)
                 .show();
     }
 
@@ -80,7 +80,7 @@ public final class Updater {
             req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             req.setDestinationInExternalFilesDir(act, null, "OtpForwarder-update.apk");
             final long id = dm.enqueue(req);
-            toast(act, "Download ho raha hai…");
+            toast(act, "Downloading…");
 
             final BroadcastReceiver rec = new BroadcastReceiver() {
                 @Override
@@ -100,7 +100,7 @@ public final class Updater {
     }
 
     private static void install(Context ctx, Uri uri) {
-        if (uri == null) { toast(ctx, "Download nahi mila"); return; }
+        if (uri == null) { toast(ctx, "Download not found"); return; }
         Intent i = new Intent(Intent.ACTION_VIEW);
         i.setDataAndType(uri, "application/vnd.android.package-archive");
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);

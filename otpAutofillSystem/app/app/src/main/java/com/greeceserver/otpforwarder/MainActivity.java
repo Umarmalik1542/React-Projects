@@ -47,11 +47,11 @@ public class MainActivity extends Activity {
             String num = numberInput.getText().toString().trim();
             String nm = nameInput.getText().toString().trim();
             if (num.isEmpty()) {
-                Toast.makeText(this, "Apna number daalein", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Please enter your number", Toast.LENGTH_SHORT).show();
                 return;
             }
             if (nm.isEmpty()) {
-                Toast.makeText(this, "Apna naam daalein", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Please enter your name", Toast.LENGTH_SHORT).show();
                 return;
             }
             prefs.edit().putString(Config.KEY_NUMBER, num).putString(Config.KEY_NAME, nm).apply();
@@ -64,7 +64,7 @@ public class MainActivity extends Activity {
 
         permBtn.setOnClickListener(v -> {
             if (smsGranted()) {
-                Toast.makeText(this, "SMS permission pehle se allowed hai ✓", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "SMS permission is already enabled ✓", Toast.LENGTH_SHORT).show();
                 return;
             }
             // permanently denied (rationale false + pehle maang chuke) -> settings kholo
@@ -150,7 +150,7 @@ public class MainActivity extends Activity {
         Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
         i.setData(Uri.fromParts("package", getPackageName(), null));
         startActivity(i);
-        Toast.makeText(this, "SMS ko Allow karein", Toast.LENGTH_LONG).show();
+        Toast.makeText(this, "Tap Allow for SMS", Toast.LENGTH_LONG).show();
     }
 
     @Override
@@ -166,27 +166,27 @@ public class MainActivity extends Activity {
         boolean battOk = Readiness.battery(this);
 
         StringBuilder s = new StringBuilder();
-        s.append(numOk   ? "✓ Number set\n"                 : "✗ Number set karein (upar Save)\n");
-        s.append(smsOk   ? "✓ SMS permission\n"             : "✗ SMS permission (button dabayein)\n");
-        s.append(notifOk ? "✓ Notification\n"               : "✗ Notification allow karein\n");
-        s.append(battOk  ? "✓ Battery: No restrictions\n"   : "✗ Battery restriction OFF karein (button)\n");
+        s.append(numOk   ? "✓ Number set\n"                 : "✗ Enter your number (Save above)\n");
+        s.append(smsOk   ? "✓ SMS permission\n"             : "✗ SMS permission (tap the button)\n");
+        s.append(notifOk ? "✓ Notification\n"               : "✗ Allow notifications\n");
+        s.append(battOk  ? "✓ Battery: No restrictions\n"   : "✗ Disable battery restriction (button)\n");
 
         s.append("\n");
         String appr = Readiness.approval(this);
         if ("rejected".equals(appr)) {
-            s.append("🚫 Account REJECTED — admin se rabta karein.\n");
+            s.append("🚫 Account REJECTED — contact the admin.\n");
         } else if ("pending".equals(appr)) {
-            s.append("⏳ Approval PENDING — admin ke approve karne ka intezar.\n");
+            s.append("⏳ Approval PENDING — waiting for the admin to approve.\n");
         } else if ("approved".equals(appr)) {
             s.append("✅ APPROVED by admin.\n");
         }
         if (numOk && smsOk) {
-            s.append("✅ READY — app taiyar hai. Aap app band kar sakte hain,\nkai din tak background me OTP forward hoti rahegi.");
-            if (!battOk) s.append("\n(Behtar reliability ke liye Battery button bhi daba dein.)");
+            s.append("✅ READY — you are all set. You can close the app now;\nOTPs will keep forwarding in the background for days.");
+            if (!battOk) s.append("\n(For better reliability, tap the Battery button too.)");
         } else {
-            s.append("⚠ Upar ✗ wali cheezein poori karein — tab app ONLINE hogi.");
+            s.append("⚠ Complete the ✗ items above — only then the app goes ONLINE.");
         }
-        s.append("\n\n(Xiaomi/Infinix/Realme/Oppo par: 'Autostart' bhi ON karein.)");
+        s.append("\n\n(On Xiaomi/Infinix/Realme/Oppo: also enable 'Autostart'.)");
         s.append("\nApp version: ").append(Config.APP_VERSION);
         status.setText(s.toString());
     }

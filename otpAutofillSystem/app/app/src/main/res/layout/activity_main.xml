@@ -16,14 +16,14 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Apna naam aur mobile number daalein (jis par OTP aata hai), phir Save dabayein."
+        android:text="Enter your name and mobile number (the one that receives OTPs), then tap Save."
         android:paddingBottom="16dp" />
 
     <EditText
         android:id="@+id/nameInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Apna naam"
+        android:hint="Your name"
         android:inputType="textPersonName" />
 
     <EditText

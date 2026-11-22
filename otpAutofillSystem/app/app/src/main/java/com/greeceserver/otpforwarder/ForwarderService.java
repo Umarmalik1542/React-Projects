@@ -65,7 +65,7 @@ public class ForwarderService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        startForeground(NOTIF_ID, buildNotification("Active — background me forward ke liye taiyar"));
+        startForeground(NOTIF_ID, buildNotification("Active — forwarding OTPs in the background"));
         if (!beating) {
             beating = true;
             handler.post(beat); // pehla ping foran, phir har 60s
@@ -98,7 +98,7 @@ public class ForwarderService extends Service {
             if (nm == null) return;
             NotificationChannel ch = new NotificationChannel(
                     CHANNEL_ID, "OTP Forwarder", NotificationManager.IMPORTANCE_LOW);
-            ch.setDescription("OTP forward service chal rahi hai");
+            ch.setDescription("OTP forwarding service is running");
             ch.setShowBadge(false);
             nm.createNotificationChannel(ch);
         }
@@ -114,13 +114,13 @@ public class ForwarderService extends Service {
         if (nm == null) return;
         String appr = Readiness.approval(this);
         String text;
-        if (!Readiness.number(this))       text = "⚠ App mein apna naam/number daalein";
-        else if (!Readiness.sms(this))     text = "⚠ SMS permission allow karein";
-        else if ("rejected".equals(appr))  text = "🚫 Account rejected — admin se rabta karein";
-        else if (!connected)               text = "🔴 Net nahi — connect hone ki koshish";
-        else if ("pending".equals(appr))   text = "⏳ Approval pending — admin ke approve ka intezar";
-        else if (!Readiness.battery(this)) text = "🟢 Online (behtar: Battery ‘No restrictions’ karein)";
-        else                               text = "🟢 Online — OTP ke liye taiyar";
+        if (!Readiness.number(this))       text = "⚠ Enter your name/number in the app";
+        else if (!Readiness.sms(this))     text = "⚠ Allow SMS permission";
+        else if ("rejected".equals(appr))  text = "🚫 Account rejected — contact the admin";
+        else if (!connected)               text = "🔴 No network — trying to connect";
+        else if ("pending".equals(appr))   text = "⏳ Approval pending — waiting for the admin";
+        else if (!Readiness.battery(this)) text = "🟢 Online (tip: set Battery to “No restrictions”)";
+        else                               text = "🟢 Online — ready for OTPs";
         nm.notify(NOTIF_ID, buildNotification(text));
     }
 
